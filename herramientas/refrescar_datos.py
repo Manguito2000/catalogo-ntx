@@ -6,7 +6,7 @@ Uso:  python3 herramientas/refrescar_datos.py --vendedores vendedores.json --sal
 import argparse, base64, datetime, hashlib, json, os, re, urllib.request
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 BCV, LIS, NUEVO = '6a230ac4aac0c5474e02901d', '6a23420aba4c079b090b2167', dict(id='6af59ce1fe2e564cd90b25b4', nombre='CLIENTE NUEVO')
-LINEAS = {'MOTORES', 'ASPAS'}
+LINEAS = {'MOTORES', 'ASPAS', 'BOBINAS', 'CARBONERAS', 'CONECTORES', 'RELAYS'}
 a = argparse.ArgumentParser(); a.add_argument('--vendedores', required=True); a.add_argument('--salida', required=True); a.add_argument('--clave-archivo'); a = a.parse_args()
 h = {'Accept': 'application/json'}
 if a.clave_archivo: h['key'] = max(re.findall(r'[A-Za-z0-9]{20,}', open(a.clave_archivo, encoding='utf-8-sig').read()), key=len)
