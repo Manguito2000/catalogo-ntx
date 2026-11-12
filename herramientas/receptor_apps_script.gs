@@ -13,9 +13,9 @@ function doGet(e) {
   }
   var cache = CacheService.getScriptCache();            // si recargan la pestaña no se duplica el correo
   if (!cache.get(String(datos.id))) {
-    MailApp.sendEmail(Session.getEffectiveUser().getEmail(), "PEDIDO NTX " + datos.id,
-      "#NTX1." + p + "\n\nCliente: " + (datos.cn ? "CLIENTE NUEVO: " + datos.cn : datos.ci) +
-      "\nPiezas: " + datos.l + "\nTarifa: " + datos.tf + " · Descuento: " + datos.d + "%" + (datos.n ? "\nNota: " + datos.n : ""));
+    MailApp.sendEmail(Session.getEffectiveUser().getEmail() + ",humboldtpartsca@gmail.com", "PEDIDO NTX " + datos.id,
+      "#NTX1." + p + "\n\n" + (datos.x || ("Cliente: " + (datos.cn ? "CLIENTE NUEVO: " + datos.cn : datos.ci) +
+      "\nPiezas: " + datos.l + "\nTarifa: " + datos.tf + " · Descuento: " + datos.d + "%" + (datos.n ? "\nNota: " + datos.n : ""))));
     cache.put(String(datos.id), "1", 21600);
   }
   return pagina("Pedido recibido", "Ya puedes cerrar esta pestaña y volver al catálogo.");
