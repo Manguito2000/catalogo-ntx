@@ -1,0 +1,598 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Catálogo NTX</title><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#16161A"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icono-192.png"><link rel="apple-touch-icon" href="icono-180.png"><meta name="apple-mobile-web-app-title" content="NTX"><style>body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+/* Catálogos NTX (motores, aspas...) como herramienta de pedido: selector de línea arriba, banda oscura fija arriba (buscar y filtrar),
+   fichas del catálogo con precio, stock y cantidad, y barra roja abajo que lleva al pedido. Todo lo rojo se toca. */
+@font-face{font-family:"BSD";src:url("fonts/BSD.ttf") format("truetype");font-weight:100 900;font-display:swap}
+:root{
+  --bg:#EEF0F2;--surface:#FFFFFF;--ink:#16161A;--mut:#55575C;--line:#D5D7DB;--chip:#EEF0F2;
+  --red:#D7141E;--red-soft:#FFE1E2;--on-red:#FFFFFF;--band:#16161A;--band-ink:#FFFFFF;--band-mut:#C9CBD0;--band-field:#2B2C30;
+  --ok:#17693A;--ok-bg:#DFF3E6;--warn:#8A4B00;--warn-bg:#FCEBCF;--off:#55575C;--off-bg:#E2E4E8;--photo:#FFFFFF;--icofill:#D9DBDF;
+  --display:"BSD","Arial Narrow","Roboto Condensed",Impact,sans-serif;--text:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E0E10;--surface:#1B1C20;--ink:#F2F3F5;--mut:#A9ACB3;--line:#34363C;--chip:#2B2C30;
+  --red:#E3222C;--red-soft:#4A1114;--on-red:#FFFFFF;--band:#000000;--band-ink:#FFFFFF;--band-mut:#C9CBD0;--band-field:#26272B;
+  --ok:#6FD79A;--ok-bg:#12331F;--warn:#F2B25C;--warn-bg:#3A2706;--off:#A9ACB3;--off-bg:#2B2C30;--photo:#FFFFFF;--icofill:#55575C;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E0E10;--surface:#1B1C20;--ink:#F2F3F5;--mut:#A9ACB3;--line:#34363C;--chip:#2B2C30;
+  --red:#E3222C;--red-soft:#4A1114;--on-red:#FFFFFF;--band:#000000;--band-ink:#FFFFFF;--band-mut:#C9CBD0;--band-field:#26272B;
+  --ok:#6FD79A;--ok-bg:#12331F;--warn:#F2B25C;--warn-bg:#3A2706;--off:#A9ACB3;--off-bg:#2B2C30;--photo:#FFFFFF;--icofill:#55575C;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--text);font-size:15px;line-height:1.4;-webkit-text-size-adjust:100%}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none;padding:0}
+:focus-visible{outline:3px solid var(--red);outline-offset:2px}
+.bs{font-family:var(--display);font-weight:700;letter-spacing:.01em}
+.num{font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--band)}
+
+/* banda superior */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:9;background:var(--band);color:var(--band-ink)}
+.top .wrap{padding-block:10px 8px;display:grid;gap:8px}
+.t1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.t1 img{height:20px;width:auto;flex:none}
+.lin{display:flex;flex:none}
+.t1 h1{order:0}
+.lin button{font-family:var(--display);font-weight:700;font-size:18px;letter-spacing:.02em;line-height:1;padding:9px 9px;border:1.5px solid #55575C;color:var(--band-mut);margin-left:-1.5px}
+.lin button:first-child{border-radius:8px 0 0 8px;margin-left:0}.lin button:last-child{border-radius:0 8px 8px 0}
+.lin button[aria-pressed="true"]{background:var(--band-ink);border-color:var(--band-ink);color:var(--band);position:relative}
+.t1 h1{margin:0;font-size:24px;line-height:1;flex:1;min-width:0}
+.lnk{font-weight:700;font-size:13px;color:var(--band-ink);border:1.5px solid #55575C;border-radius:8px;padding:8px 9px;white-space:nowrap;margin-left:auto}
+.back{margin-left:auto;background:var(--red);color:var(--on-red);font-weight:800;letter-spacing:.06em;font-size:13px;border-radius:8px;padding:9px 13px;white-space:nowrap}
+.back:not([hidden])+.lnk{margin-left:0}
+.srch{display:flex;gap:8px}
+.srch input{flex:1;min-width:0;background:var(--band-field);border:1.5px solid transparent;border-radius:10px;padding:11px 12px;font-size:16px;color:var(--band-ink)}
+.srch input::placeholder{color:var(--band-mut)}
+.srch input:focus{border-color:var(--red);outline:none}
+.scroller{overflow-x:auto;scrollbar-width:none;margin-inline:calc(-1*max(16px,env(safe-area-inset-left,0px))) calc(-1*max(16px,env(safe-area-inset-right,0px)))}
+.scroller::-webkit-scrollbar{display:none}
+.chips{display:flex;gap:6px;padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));width:max-content}
+.chips button{font-family:var(--display);font-weight:700;font-size:17px;letter-spacing:.02em;padding:6px 11px;border-radius:8px;border:1.5px solid #55575C;color:var(--band-ink);white-space:nowrap}
+.chips button[aria-pressed="true"]{background:var(--red);border-color:var(--red);color:var(--on-red)}
+
+/* barra de opciones bajo la banda */
+.opts{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding-block:12px 4px}
+.seg{display:inline-flex;border:1.5px solid var(--line);border-radius:9px;overflow:hidden;background:var(--surface)}
+.seg button{padding:8px 13px;font-weight:700;font-size:13px;color:var(--mut)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.lbl{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--mut);text-transform:uppercase}
+.tog{display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:13px}
+.tog input{width:18px;height:18px;accent-color:var(--red)}
+.cnt{margin-left:auto;font-size:13px;color:var(--mut);font-weight:600}
+.msg{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:13px;font-weight:600;margin-top:10px}
+
+/* fichas */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(330px,100%),1fr));gap:10px;padding-block:8px 110px}
+.fam{grid-column:1/-1;margin:10px 0 0;font-size:26px;line-height:1;color:var(--red);border-bottom:2px solid var(--ink);padding-bottom:5px}
+.cd{background:var(--surface);border-radius:12px;padding:10px;display:grid;grid-template-columns:118px minmax(0,1fr);gap:4px 12px;border:1.5px solid transparent}
+.cd.in{border-color:var(--red)}
+.ph{position:relative;background:var(--photo);border-radius:8px;aspect-ratio:1;display:grid;place-items:center;overflow:hidden;width:100%;grid-row:1/3;align-self:start}
+.ph img.v1{width:92%;height:92%;object-fit:contain}
+.ph img.v2{position:absolute;right:3px;bottom:3px;width:36%;height:36%;object-fit:contain;background:#fff;border:1px solid #D5D7DB;border-radius:5px}
+.ph .nof{font-size:10px;font-weight:800;letter-spacing:.1em;color:#55575C;text-align:center}
+.cod{font-size:34px;line-height:.9}
+.cr{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dia{font-size:19px;line-height:1;border:2px solid var(--ink);border-radius:6px;padding:3px 7px;white-space:nowrap}
+button.tg.asp{font-family:var(--text);min-height:22px}
+.oth{grid-column:1/-1;text-align:left;background:var(--surface);border:1.5px solid var(--red);color:var(--red);font-weight:800;border-radius:10px;padding:11px 12px}
+.b1{font-size:19px;line-height:1;color:var(--red);margin-top:3px}
+.b2{font-size:10.5px;font-weight:800;color:var(--red);letter-spacing:.03em;margin-top:2px}
+.chp{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.ej,.tg{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;border-radius:5px;padding:2px 6px;white-space:nowrap}
+.ej{border:1.3px solid var(--ink)}
+.ej svg{width:13px;height:13px;flex:none}
+.tg{background:var(--ink);color:var(--surface)}
+.tg.asp{background:var(--red);color:var(--on-red)}
+.app{font-weight:700;font-size:13.5px;line-height:1.25;margin-top:6px;overflow-wrap:anywhere}
+.buy{grid-column:2;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
+.pr{font-size:26px;line-height:1}
+.st{font-size:11px;font-weight:800;border-radius:20px;padding:3px 8px;white-space:nowrap}
+.st.ok{background:var(--ok-bg);color:var(--ok)}.st.low{background:var(--warn-bg);color:var(--warn)}.st.no{background:var(--off-bg);color:var(--off)}
+.add{margin-left:auto;background:var(--red);color:var(--on-red);font-weight:800;letter-spacing:.05em;font-size:13px;border-radius:9px;padding:10px 14px;min-height:40px}
+.stp{margin-left:auto;display:inline-flex;align-items:center;border-radius:9px;overflow:hidden;background:var(--red);color:var(--on-red)}
+.stp button{width:40px;height:40px;font-size:22px;font-weight:700;color:var(--on-red);line-height:1}
+.stp input{width:44px;height:40px;text-align:center;border:0;background:var(--surface);color:var(--ink);font-weight:800;font-size:16px;border-block:2px solid var(--red);-moz-appearance:textfield;border-radius:0}
+.stp input::-webkit-outer-spin-button,.stp input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.empty{grid-column:1/-1;background:var(--surface);border-radius:12px;padding:26px 18px;text-align:center;color:var(--mut);font-weight:600}
+
+/* barra roja inferior */
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:8;background:var(--red);color:var(--on-red);padding-bottom:env(safe-area-inset-bottom,0px)}
+.bar button{display:flex;align-items:center;gap:12px;width:100%;max-width:1180px;margin:0 auto;padding-block:12px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));color:var(--on-red);text-align:left}
+.bar b{display:block;font-weight:800;letter-spacing:.05em;font-size:16px}
+.bar span{font-size:12.5px;font-weight:600;color:#FFE1E2}
+.bar i{margin-left:auto;font-style:normal;font-size:30px;font-weight:800;line-height:1}
+.bar .tot{font-size:30px;line-height:1}
+
+/* pedido */
+.pg{max-width:720px;margin:0 auto;display:grid;gap:14px;padding-block:14px 40px}
+.pg h2{margin:0;font-size:32px;line-height:1}
+.box{background:var(--surface);border-radius:12px;padding:14px;display:grid;gap:10px}
+.box>.lbl{margin-bottom:-2px}
+.fld{width:100%;background:var(--bg);border:1.5px solid var(--line);border-radius:10px;padding:12px;font-size:16px}
+.fld:focus{border-color:var(--red);outline:none}
+textarea.fld{min-height:70px;resize:vertical}
+.sug{display:grid;gap:0;border:1.5px solid var(--line);border-radius:10px;overflow:hidden}
+.sug button{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);font-weight:600;display:flex;gap:8px;align-items:baseline}
+.sug button:last-child{border-bottom:0}
+.sug em{font-style:normal;font-size:11px;color:var(--mut);font-weight:700;margin-left:auto;white-space:nowrap}
+.sel{display:flex;align-items:center;gap:10px;background:var(--bg);border-radius:10px;padding:11px 12px;font-weight:800}
+.sel span{flex:1;min-width:0;overflow-wrap:anywhere}
+.sel small{display:block;font-weight:600;color:var(--mut);font-size:12px}
+.txt{color:var(--red);font-weight:800;font-size:13px;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}
+.two{display:flex;flex-wrap:wrap;gap:12px 22px}
+.two>div{display:grid;gap:6px}
+.ln{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;align-items:center;padding-block:10px;border-bottom:1px solid var(--line)}
+.ln:last-of-type{border-bottom:0}
+.ln .c{font-size:24px;line-height:1}
+.ln .d{font-size:12.5px;color:var(--mut);font-weight:600;overflow-wrap:anywhere}
+.ln .w{font-size:12px;font-weight:700;color:var(--warn)}
+.ln .m{grid-column:1/-1;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--mut);font-weight:600}
+.ln .m b{margin-left:auto;color:var(--ink);font-size:16px}
+.ln .stp{margin-left:0}
+.dsc{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.pct{display:inline-flex;align-items:center;gap:6px;font-weight:700}
+.pct input{width:76px;padding:8px 10px}
+.pct small{color:var(--mut);font-weight:600}
+.vd{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding-block:8px;border-bottom:1px solid var(--line)}
+.vd:last-child{border-bottom:0}
+.vd span{flex:1;min-width:150px}
+.vd small{display:block;color:var(--mut);font-weight:600;font-size:12px}
+.vd select{width:auto;min-width:130px;padding:9px 10px}
+.sum{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-top:2px solid var(--ink);padding-top:10px}
+.sum b{font-size:38px;line-height:1}
+.send{background:var(--red);color:var(--on-red);font-weight:800;letter-spacing:.06em;font-size:17px;border-radius:12px;padding:16px;width:100%;display:block;text-align:center;text-decoration:none}
+a.ghost{display:block;text-align:center;text-decoration:none;color:var(--ink)}
+.cod2{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.cod2 input{flex:1;min-width:160px;background:var(--surface);text-transform:uppercase}
+.cod2 button{background:var(--red);color:var(--on-red);font-weight:800;letter-spacing:.05em;border-radius:10px;padding:0 16px;min-height:46px}
+.inf{background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:12px;margin-top:10px;font-weight:600;font-size:13.5px}
+.send[disabled]{background:var(--off-bg);color:var(--off);cursor:not-allowed}
+.ghost{border:1.5px solid var(--line);border-radius:12px;padding:13px;font-weight:800;width:100%;background:var(--surface)}
+.hint{font-size:13px;color:var(--mut);font-weight:500;margin:0}
+.okb{background:var(--ok-bg);color:var(--ok);border-radius:12px;padding:14px;font-weight:700}
+.okb b{display:block;font-size:17px}
+pre.copy{margin:0;background:var(--bg);border-radius:10px;padding:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;white-space:pre-wrap;overflow-wrap:anywhere;user-select:all}
+
+/* enviados */
+.od{background:var(--surface);border-radius:12px;padding:14px;display:grid;gap:6px}
+.od .h{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.od .h b{font-size:16px;flex:1;min-width:0;overflow-wrap:anywhere}
+.od .i{font-size:13px;color:var(--mut);font-weight:600;overflow-wrap:anywhere}
+.od .f{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.od .f .pr{font-size:24px}
+
+/* foto ampliada */
+.zoom{position:fixed;inset:0;z-index:20;background:rgba(10,10,12,.92);display:grid;place-items:center;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px))}
+.zoom div{display:grid;gap:10px;max-width:560px;width:100%;max-height:100%;overflow:auto}
+.zoom img{width:100%;background:#fff;border-radius:10px;object-fit:contain;max-height:42vh}
+.zoom button{background:var(--red);color:#fff;font-weight:800;letter-spacing:.06em;border-radius:10px;padding:13px}
+@media (max-width:380px){.cd{grid-template-columns:96px minmax(0,1fr)}.cod{font-size:30px}}
+@media (prefers-reduced-motion:no-preference){.cd{transition:border-color .15s}}
+</style>
+
+<header class="top"><div class="wrap">
+  <div class="t1">
+    <img src="img/logo.png" alt="NTX Original Parts">
+    <div class="lin" id="lin" role="group" aria-label="Línea de productos"></div>
+    <h1 class="bs" id="ttl" hidden>PEDIDO</h1>
+    <button class="back" id="btnBack" hidden>‹ CATÁLOGO</button>
+    <button class="lnk" id="btnEnv">Enviados</button>
+  </div>
+  <div id="tools" style="display:grid;gap:8px">
+    <div class="srch"><input id="q" type="search" inputmode="search" autocomplete="off" placeholder="Busca código, marca o modelo" aria-label="Buscar pieza"></div>
+    <div class="scroller"><div class="chips" id="brands"></div></div>
+  </div>
+</div></header>
+
+<main class="wrap">
+  <section id="vCat">
+    <div class="opts">
+      <span class="lbl">Tarifa</span>
+      <div class="seg" id="segT" role="group" aria-label="Tarifa"></div>
+      <label class="tog"><input type="checkbox" id="onlyStock"> Solo con stock</label>
+      <span class="cnt" id="cnt"></span>
+    </div>
+    <div class="msg" id="dataMsg" hidden></div>
+    <div class="inf" id="codeBox" hidden><span id="codeTxt">Vendedores: ingresa tu código para ver precios, stock y tus clientes.</span><div class="cod2"><input class="fld" id="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Tu código de vendedor" aria-label="Código de vendedor"><button id="codeGo">ENTRAR</button></div></div>
+    <div class="msg" id="accMsg" hidden>Tu acceso como vendedor aún no está activado: puedes ver el catálogo, pero no enviar pedidos. Avísale a Mango para que te asigne tu cartera.</div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <section id="vPed" class="pg" hidden></section>
+  <section id="vEnv" class="pg" hidden></section>
+</main>
+
+<div class="bar" id="bar" hidden><button id="btnCart"><span><b>VER PEDIDO</b><span id="barTxt"></span></span><span class="tot bs num" id="barTot"></span><i>›</i></button></div>
+<div class="zoom" id="zoom" hidden><div><img id="z1" alt=""><img id="z2" alt=""><button id="zClose">CERRAR</button></div></div>
+
+<script>
+const ITEMS = [{"c":"MT1","l":"motores","b":["CHEVROLET","DODGE"],"f":"CHEVROLET","m":"Century · Ram reforzado · Caliber · Cavalier · Sunfire","t":[],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT3","l":"motores","b":["CHEVROLET","HONDA","TOYOTA"],"f":"CHEVROLET","m":"Grand Vitara XL5 · Civic · CR-V · Accord 02/07 · Hiace","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT7","l":"motores","b":["CHEVROLET"],"f":"CHEVROLET","m":"Silverado 2008 · Avalanche · Tahoe","t":[],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT8","l":"motores","b":["CHEVROLET"],"f":"CHEVROLET","m":"Spark 04/08 · Meriva","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT10","l":"motores","b":["CHEVROLET"],"f":"CHEVROLET","m":"Aveo 05/10","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT12","l":"motores","b":["KIA","HYUNDAI"],"f":"CHEVROLET","m":"Picanto 08 · Elantra (todos)","t":[],"s":"","fj":"Clip","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT14","l":"motores","b":["CHEVROLET"],"f":"CHEVROLET","m":"Optra","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT622","l":"motores","b":["CHEVROLET"],"f":"CHEVROLET","m":"Optra 2 cuadrantes","t":["A/A"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT16","l":"motores","b":["CHEVROLET"],"f":"CHEVROLET","m":"Corsa principal con clip","t":["PRINCIPAL"],"s":"","fj":"Clip","fo":"Eje redondo con pasador","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT22","l":"motores","b":["CHEVROLET"],"f":"CHEVROLET","m":"Aveo radiador","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT25","l":"motores","b":["CHEVROLET"],"f":"CHEVROLET","m":"Corsa 97/99 tipo Bosch","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna","lg":false,"x":[],"d":null,"i1":false,"i2":false,"sc":null},{"c":"MT28","l":"motores","b":["CHEVROLET"],"f":"CHEVROLET","m":"Aveo 2016 radiador (único)","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":false,"sc":null},{"c":"MT305","l":"motores","b":["CHEVROLET"],"f":"CHEVROLET","m":"Montana","t":["A/A"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT100","l":"motores","b":["JEEP"],"f":"JEEP · CHRYSLER · DODGE","m":"Cherokee 88/94","t":[],"s":"","fj":"Clip","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT103","l":"motores","b":["DODGE"],"f":"JEEP · CHRYSLER · DODGE","m":"Spirit","t":[],"s":"","fj":"Clip","fo":"Eje redondo con pasador","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT104","l":"motores","b":["JEEP"],"f":"JEEP · CHRYSLER · DODGE","m":"Grand Cherokee 00/05 · Liberty 3.7 99/07","t":["2 PINES"],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT108","l":"motores","b":["CHRYSLER"],"f":"JEEP · CHRYSLER · DODGE","m":"Neon 01/05 dual","t":["CON RESISTENCIA"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT109","l":"motores","b":["CHRYSLER"],"f":"JEEP · CHRYSLER · DODGE","m":"Neon 02/04","t":["CON RESISTENCIA"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT110","l":"motores","b":["JEEP"],"f":"JEEP · CHRYSLER · DODGE","m":"Cherokee Limited 4.7 00/05 · Base genérica","t":["3 CABLES"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT111","l":"motores","b":["JEEP"],"f":"JEEP · CHRYSLER · DODGE","m":"Cherokee Limited 4.7 (estrella)","t":["3 CABLES"],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT112","l":"motores","b":["JEEP"],"f":"JEEP · CHRYSLER · DODGE","m":"Grand Cherokee 4.0L 04 · Liberty 3.7L 05/06","t":["3 PINES"],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT115","l":"motores","b":["JEEP"],"f":"JEEP · CHRYSLER · DODGE","m":"Cherokee KK","t":[],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT120","l":"motores","b":["JEEP"],"f":"JEEP · CHRYSLER · DODGE","m":"Grand Cherokee 4G","t":[],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT300","l":"motores","b":["FORD","FIAT"],"f":"FORD","m":"Focus (el 440) · Palio 1.3","t":[],"s":"","fj":"Clip","fo":"Eje redondo con pasador","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT403TV","l":"motores","b":["FORD"],"f":"FORD","m":"Fiesta · EcoSport (todas) tipo Valeo","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":true,"x":["A400"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT405","l":"motores","b":["FORD"],"f":"FORD","m":"Fiesta Titanium","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":["A407"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT407","l":"motores","b":["FORD"],"f":"FORD","m":"Fiesta · EcoSport Titanium (conector marrón)","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":["A407"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT417","l":"motores","b":["FORD","CHEVROLET","CADILLAC"],"f":"FORD","m":"F-150 · Tahoe · Silverado · Avalanche · Escalade 10/14","t":[],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT500","l":"motores","b":["HONDA"],"f":"HONDA","m":"Civic 97/98 · CR-V 00/05","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":0.84},{"c":"MT501","l":"motores","b":["HONDA"],"f":"HONDA","m":"Civic 98/05","t":[],"s":"","fj":"Rosca","fo":"Media luna pequeña","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT503","l":"motores","b":["HONDA"],"f":"HONDA","m":"Civic · Fit · CR-V","t":["A/A"],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":["A503"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT507","l":"motores","b":["MITSUBISHI","TOYOTA"],"f":"HONDA","m":"Montero plano grande · Starlet · Paseo · RAV4","t":["A/A"],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT510","l":"motores","b":["HONDA"],"f":"HONDA","m":"CR-V 08 · Civic 1.8 · Fit Emotion","t":["A/A","CON RESISTENCIA"],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT513","l":"motores","b":["HONDA"],"f":"HONDA","m":"Civic 2015","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT600","l":"motores","b":["HYUNDAI"],"f":"HYUNDAI","m":"Accent","t":[],"s":"","fj":"Clip","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT601","l":"motores","b":["HYUNDAI"],"f":"HYUNDAI","m":"Accent rosca","t":[],"s":"","fj":"Rosca","fo":"","lg":true,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT602","l":"motores","b":["HYUNDAI","KIA"],"f":"HYUNDAI","m":"Accent · Kia 2002/06","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT604","l":"motores","b":["HYUNDAI","KIA"],"f":"HYUNDAI","m":"Tucson 07/09 · Sorento 2005","t":["4 CABLES"],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT605","l":"motores","b":["HYUNDAI"],"f":"HYUNDAI","m":"Getz 1.6","t":["CON RESISTENCIA"],"s":"","fj":"Clip","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT607","l":"motores","b":["HYUNDAI"],"f":"HYUNDAI","m":"Santa Fe 01/05","t":[],"s":"","fj":"Clip","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT608","l":"motores","b":["HYUNDAI"],"f":"HYUNDAI","m":"Tucson ix manual 07/11","t":[],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT609","l":"motores","b":["HYUNDAI"],"f":"HYUNDAI","m":"Elantra","t":[],"s":"","fj":"Clip","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT200-24V","l":"motores","b":["HYUNDAI","DAEWOO"],"f":"HYUNDAI","m":"H65 · 3 Tornillos","t":["24V"],"s":"UNIVERSAL","fj":"Rosca","fo":"Media luna pequeña","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT700","l":"motores","b":["KIA"],"f":"KIA","m":"Rio","t":["A/A"],"s":"","fj":"Rosca","fo":"Doble saque","lg":true,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT701","l":"motores","b":["KIA"],"f":"KIA","m":"Picanto 2010/2014","t":["160 W"],"s":"","fj":"Clip","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT705","l":"motores","b":["KIA"],"f":"KIA","m":"Pregio · Rio CVVT pata cerrada","t":[],"s":"","fj":"Rosca","fo":"","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT706","l":"motores","b":["KIA","HYUNDAI"],"f":"KIA","m":"Picanto automático 05/07 · Getz 1.6 giro izquierdo","t":["3 CABLES","CON RESISTENCIA"],"s":"","fj":"Clip","fo":"Doble saque","lg":false,"x":["A701"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT714","l":"motores","b":["KIA"],"f":"KIA","m":"Rio · Soluto 19/25 acople estrella C18A macho","t":["280 W"],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT800","l":"motores","b":["MAZDA"],"f":"MAZDA","m":"323 95/97","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT801","l":"motores","b":["MAZDA"],"f":"MAZDA","m":"Mazda 3","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT900","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer 93/96","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT901","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer 93/96 con válvula","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT902","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer 95/00 con válvula mediano","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT903","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer 93/06 2 conectores motor pequeño","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT905","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer 97/99 · Signo","t":["A/A"],"s":"UNIVERSAL","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT908","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer 96/02","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT909","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Plano 3 puntas (adaptar) · Signo 05/08 · Lancer","t":[],"s":"UNIVERSAL","fj":"Rosca","fo":"Doble saque","lg":true,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT909G","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer 03/06 eje largo plano","t":[],"s":"UNIVERSAL","fj":"Rosca","fo":"Doble saque mediano","lg":true,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT909G24V","l":"motores","b":["THERMO KING"],"f":"MITSUBISHI","m":"Adaptable reforzado plano 3 puntas","t":["24V"],"s":"UNIVERSAL","fj":"Rosca","fo":"Doble saque mediano","lg":true,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT910","l":"motores","b":["MITSUBISHI","TOYOTA"],"f":"MITSUBISHI","m":"Lancer grande principal (igual a MT1200)","t":["PRINCIPAL"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":0.873},{"c":"MT911","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer mediano","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT913","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Plano","t":["A/A"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT914","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer Touring 06/14","t":["2 PINES"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT916","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer 2000 · ASX 2012","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT917","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Mirage · Attrage (nuevos)","t":["4 PINES"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":["A917"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT920","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer Touring CS6 · CS3 · Signo cable largo (aplica)","t":["A/A","2 PINES"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT926","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"L200 · Montero Sport","t":[],"s":"","fj":"Rosca","fo":"Doble saque mediano","lg":false,"x":[],"d":null,"i1":true,"i2":false,"sc":null},{"c":"MT928","l":"motores","b":["MITSUBISHI"],"f":"MITSUBISHI","m":"Lancer Touring CS6 · CS3 · Signo cable largo (original)","t":["A/A","2 PINES"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1000","l":"motores","b":["NISSAN","MITSUBISHI","MAZDA"],"f":"NISSAN","m":"B13 · B14 90/99 · Lancer 08 · Mazda 626 00/02","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1001","l":"motores","b":["NISSAN","MITSUBISHI"],"f":"NISSAN","m":"B15 · Murano · X-Trail · Tiida · Lancer 2005/09","t":["4 PINES"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":["A1001"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1002","l":"motores","b":["NISSAN"],"f":"NISSAN","m":"B14 · B15 · X-Trail · Murano · Tiida","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1003","l":"motores","b":["NISSAN"],"f":"NISSAN","m":"B13 90/99 · B14 · B15","t":["4 CABLES"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1004","l":"motores","b":["NISSAN","MITSUBISHI"],"f":"NISSAN","m":"B14 · X-Trail principal · Lancer 2005/09 · Touring 02/14","t":["PRINCIPAL"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":["A1002"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1005","l":"motores","b":["NISSAN","FORD"],"f":"NISSAN","m":"B12 · B13 · Ford Laser","t":["A/A","2 CABLES"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1006","l":"motores","b":["NISSAN"],"f":"NISSAN","m":"Sentra 1.1/1.4/1.6 95/98 · B13 95/99","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna pequeña","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1009","l":"motores","b":["NISSAN"],"f":"NISSAN","m":"B14 · X-Trail · Tiida · Murano 99/10 (conector Invertido)","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1102","l":"motores","b":["RENAULT"],"f":"RENAULT","m":"Twingo","t":[],"s":"","fj":"Rosca","fo":"Doble saque fino","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1200","l":"motores","b":["TOYOTA","MITSUBISHI"],"f":"TOYOTA","m":"Corolla Araya · Baby Camry 1.6 sincrónico · Lancer grande principal","t":["PRINCIPAL"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1201","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Terios 02/07 · Camry 02/06","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1202","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Corolla automático 97/99 1.6/1.8 · Baby Camry grande","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":["A511"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1203","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Yaris (todos)","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":["A1234"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1204","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Yaris con cable","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT101","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Corolla New Sensation 08/11 automático","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1205","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Ávila","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":0.938},{"c":"MT1206","l":"motores","b":["TOYOTA","MITSUBISHI"],"f":"TOYOTA","m":"Starlet 97/00 · Lancer 00/04","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":0.817},{"c":"MT1208","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Corolla 96/02 plano","t":["A/A"],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":["A503"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1215","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Corolla New Sensation sincrónico","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1216","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Hiace 05/14","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1220","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Terios 08/10","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":["A1234"],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1227","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Coaster condensador","t":["24V","160 W"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":["A1227"],"d":null,"i1":true,"i2":false,"sc":null},{"c":"MT1228","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Yaris 14/16 tipo original","t":["180 W"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1243","l":"motores","b":["TOYOTA"],"f":"TOYOTA","m":"Corolla Cross · Yaris Cross · RAV4 (Nuevas)","t":[],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":["A1243"],"d":null,"i1":true,"i2":false,"sc":null},{"c":"MT1700","l":"motores","b":["VENIRAUTO"],"f":"VENIRAUTO · CHERY","m":"Centauro 1.6 principal","t":["PRINCIPAL"],"s":"","fj":"Clip","fo":"Eje redondo con pasador","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1701","l":"motores","b":["VENIRAUTO"],"f":"VENIRAUTO · CHERY","m":"Samán · Pasador en el eje","t":[],"s":"","fj":"Clip","fo":"Eje redondo con pasador","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1702","l":"motores","b":["CHERY","CARRO CHINO"],"f":"VENIRAUTO · CHERY","m":"Orinoco","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":false,"sc":null},{"c":"MT1900","l":"motores","b":["CHEVROLET","SUZUKI"],"f":"SUZUKI","m":"Grand Vitara XL7 · Swift","t":["4 CABLES"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1902","l":"motores","b":["CHEVROLET","HONDA"],"f":"SUZUKI","m":"Grand Vitara XL5 · Honda Civic","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1907","l":"motores","b":["SUZUKI"],"f":"SUZUKI","m":"Swift 13/15 · Vitara 2014/2022 · Baleno 17/19","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1915-OM","l":"motores","b":["SUZUKI","MITSUBISHI"],"f":"SUZUKI","m":"Jimny · L200 original","t":["A/A"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1920","l":"motores","b":["SUZUKI"],"f":"SUZUKI","m":"Ciaz · Celerio 17/19","t":["280 W"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"MT1922","l":"motores","b":["SUZUKI","TOYOTA","MITSUBISHI"],"f":"SUZUKI","m":"Ertiga · Vitara XL7 · Yaris 22/24 · Camry 22 · Outlander · Xpander 22","t":["4 CABLES"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":null,"i1":true,"i2":true,"sc":null},{"c":"A11","l":"aspas","b":["CHEVROLET"],"f":"","m":"Aveo","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":23.5,"i1":true,"i2":false,"sc":null},{"c":"A22","l":"aspas","b":["CHEVROLET"],"f":"","m":"Aveo","t":["PRINCIPAL"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":29,"i1":true,"i2":false,"sc":null},{"c":"A305TV","l":"aspas","b":["FIAT"],"f":"","m":"Fire","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":38.5,"i1":true,"i2":false,"sc":null},{"c":"A400","l":"aspas","b":["FORD"],"f":"","m":"Fiesta","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":["MT403TV"],"d":34.6,"i1":true,"i2":false,"sc":null},{"c":"A407","l":"aspas","b":["FORD"],"f":"","m":"Fiesta Titanium","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":["MT405","MT407"],"d":34.4,"i1":true,"i2":false,"sc":null},{"c":"A501","l":"aspas","b":["HONDA"],"f":"","m":"Civic · Accord · Fit","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna pequeña","lg":false,"x":[],"d":29.2,"i1":true,"i2":false,"sc":null},{"c":"A503","l":"aspas","b":["HONDA"],"f":"","m":"Civic 06/08 · Pilot 03","t":[],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":["MT503","MT1208"],"d":27.7,"i1":true,"i2":false,"sc":null},{"c":"A506","l":"aspas","b":["HONDA"],"f":"","m":"CR-V 2.0 / 2.4","t":["PRINCIPAL"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":31.4,"i1":true,"i2":false,"sc":null},{"c":"A507","l":"aspas","b":["HONDA","TOYOTA"],"f":"","m":"CR-V · Terios Bego · Yaris 04 · RAV4","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":30,"i1":true,"i2":false,"sc":null},{"c":"A508","l":"aspas","b":["HONDA","MITSUBISHI","TOYOTA"],"f":"","m":"Varios modelos","t":["A/A"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":27.5,"i1":true,"i2":false,"sc":null},{"c":"A511","l":"aspas","b":["TOYOTA","HONDA"],"f":"","m":"Corolla 1.6 (motor grande) · Honda","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":["MT1202"],"d":29.7,"i1":true,"i2":false,"sc":null},{"c":"A512","l":"aspas","b":["HONDA"],"f":"","m":"Varios modelos","t":["PRINCIPAL","GIRO CONTRARIO"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":33.6,"i1":true,"i2":false,"sc":null},{"c":"A513","l":"aspas","b":["HONDA"],"f":"","m":"Fit 05/08","t":["PRINCIPAL"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":29.8,"i1":true,"i2":false,"sc":null},{"c":"A514","l":"aspas","b":["HONDA"],"f":"","m":"CR-V 07/08","t":["PRINCIPAL"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":30.1,"i1":true,"i2":false,"sc":null},{"c":"A515","l":"aspas","b":["HONDA"],"f":"","m":"Civic 1.2","t":["A/A"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":28,"i1":true,"i2":false,"sc":null},{"c":"A516","l":"aspas","b":["HONDA"],"f":"","m":"Civic 06/08 · Fit · CR-V 07/08 · Pilot 03 · Odyssey 2.4 09/11","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":30,"i1":true,"i2":false,"sc":null},{"c":"A517","l":"aspas","b":["HONDA"],"f":"","m":"Odyssey 2.4 09/11","t":["A/A","CW"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":[],"d":31.9,"i1":true,"i2":false,"sc":null},{"c":"A612","l":"aspas","b":["HYUNDAI"],"f":"","m":"i10 2019","t":[],"s":"","fj":"Clip","fo":"Doble saque","lg":false,"x":[],"d":33.1,"i1":true,"i2":false,"sc":null},{"c":"A701","l":"aspas","b":["KIA"],"f":"","m":"Picanto","t":[],"s":"","fj":"Clip","fo":"Doble saque","lg":false,"x":["MT706"],"d":34.1,"i1":true,"i2":false,"sc":null},{"c":"A917","l":"aspas","b":["MITSUBISHI"],"f":"","m":"Mirage 2014-2019","t":["GIRO CONTRARIO"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":["MT917"],"d":35.4,"i1":true,"i2":false,"sc":null},{"c":"A1001","l":"aspas","b":["NISSAN","MITSUBISHI"],"f":"","m":"X-Trail · Murano · Lancer GLX","t":[],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":["MT1001"],"d":33.2,"i1":true,"i2":false,"sc":null},{"c":"A1002","l":"aspas","b":["MITSUBISHI"],"f":"","m":"Lancer 2005/2009","t":["PRINCIPAL"],"s":"","fj":"Rosca","fo":"Media luna grande","lg":false,"x":["MT1004"],"d":31.7,"i1":true,"i2":false,"sc":null},{"c":"A1100","l":"aspas","b":["RENAULT"],"f":"","m":"Megane · Logan","t":[],"s":"","fj":"Rosca","fo":"Doble saque fino","lg":false,"x":[],"d":38.3,"i1":true,"i2":false,"sc":null},{"c":"A1200","l":"aspas","b":["TOYOTA"],"f":"","m":"Corolla · Hiace","t":["ORIGINAL"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":35.8,"i1":true,"i2":false,"sc":null},{"c":"A1202","l":"aspas","b":["TOYOTA"],"f":"","m":"Corolla GLi 2009-2014","t":["ORIGINAL"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":37.5,"i1":true,"i2":false,"sc":null},{"c":"A1204","l":"aspas","b":["TOYOTA","MITSUBISHI","HONDA"],"f":"","m":"Varios modelos","t":[],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":29.9,"i1":true,"i2":false,"sc":null},{"c":"A1205","l":"aspas","b":["TOYOTA","MITSUBISHI"],"f":"","m":"Varios modelos","t":["A/A"],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":[],"d":24.2,"i1":true,"i2":false,"sc":null},{"c":"A1227","l":"aspas","b":["TOYOTA"],"f":"","m":"Coaster","t":["4 PALETAS"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":["MT1227"],"d":26.9,"i1":true,"i2":false,"sc":null},{"c":"A1233","l":"aspas","b":["TOYOTA"],"f":"","m":"Corolla · Tercel (motor mediano)","t":["PRINCIPAL"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":[],"d":28,"i1":true,"i2":false,"sc":null},{"c":"A1234","l":"aspas","b":["TOYOTA"],"f":"","m":"Yaris 06/08 · Terios Bego","t":["PRINCIPAL"],"s":"","fj":"Rosca","fo":"Doble saque","lg":false,"x":["MT1203","MT1220"],"d":34,"i1":true,"i2":false,"sc":null},{"c":"A1243","l":"aspas","b":["TOYOTA"],"f":"","m":"Corolla Cross","t":[],"s":"","fj":"Acople estrella","fo":"No aplica","lg":false,"x":["MT1243"],"d":46.3,"i1":true,"i2":false,"sc":null}];
+const LINEAS = [{"id":"motores","n":"MOTORES","u1":"motor","u2":"motores"},{"id":"aspas","n":"ASPAS","u1":"aspa","u2":"aspas"}];
+const LIN = Object.fromEntries(LINEAS.map(l => [l.id, l]));
+const TARIFAS = [["usd","USD"],["bcv","BCV"]], TIDX = {usd:0,lista:1,bcv:2}, TNAME = {usd:"USD",lista:"Lista",bcv:"BCV"};
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const norm = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase();
+const money = n => "$" + (Math.round(n*100)/100).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const BY = Object.fromEntries(ITEMS.map(i => [i.c, i]));
+ITEMS.forEach(i => i.k = norm([i.c, i.c.replace(/^[A-Z]+/,""), i.b.join(" "), i.m, i.t.join(" "), i.s, i.x.join(" "), i.fj, i.fo, i.d ? i.d + " " + String(i.d).replace(".",",") : ""].join(" ")));
+const cm = v => String(v).replace(".",",");
+const cname = c => !c ? "Sin cliente" : c.nuevo ? (c.nombreNuevo || "").trim() + " (cliente nuevo)" : c.nombre;
+
+/* estado */
+const S = { linea:LINEAS[0].id, pp:{}, nuevo:null, q:"", brand:"", onlyStock:false, tarifa:"usd", tipo:"pedido", cart:{}, cliente:null, nota:"", cq:"", desc:{modo:"no",pct:10}, rol:"cargando", yo:null, vend:{}, accesos:[], esDueno:false,
+            precios:null, fecha:null, clientes:[], pedidos:null, dbOk:null, enviado:null, sending:false, err:"" };
+let db = null;
+const MODO = "vendedor", VEND = [{"s":"vVEHO5ivoqGqrmrt/XV5Kw==","i":"guFxXE8DX3IscpTY","d":"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"},{"s":"U9MaHnsPQqWEDF8oldpmYQ==","i":"vrOyURoxwr/VU23x","d":"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"},{"s":"KOUtqmFs3pXPQJsLtsFswg==","i":"kcpjG0iGtW/sJUZy","d":"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"}], SCRIPT_URL = "";
+const EXT = MODO === "vendedor", LSE = "ntx-enviados", LSC = "ntx-codigo";
+const listo = () => EXT ? S.rol === "vendedor" : !!db && (S.rol === "total" || S.rol === "vendedor");
+const LS = "ntx-pedido-motores";
+function save(){ try{ localStorage.setItem(LS, JSON.stringify({linea:S.linea, cart:S.cart, cliente:S.cliente, nota:S.nota, tarifa:S.tarifa, tipo:S.tipo, onlyStock:S.onlyStock, desc:S.desc})); }catch(e){} }
+try{ const d = JSON.parse(localStorage.getItem(LS) || "null"); if(d){ for(const k of ["cliente","nota","tarifa","tipo","onlyStock"]) if(d[k] != null) S[k] = d[k]; if(LIN[d.linea]) S.linea = d.linea; if(d.desc && ["no","contado","otro"].includes(d.desc.modo)) S.desc = { modo:d.desc.modo, pct:Number(d.desc.pct) || 10 }; if(!TARIFAS.some(x => x[0] === S.tarifa)) S.tarifa = "usd"; for(const [c,q] of Object.entries(d.cart||{})) if(BY[c] && q > 0) S.cart[c] = q; } }catch(e){}
+
+const price = (c, t) => { const p = S.precios && S.precios[c]; const v = p ? p[TIDX[t || S.tarifa]] : null; return typeof v === "number" && v > 0 ? v : null; };
+const stock = c => { const p = S.precios && S.precios[c]; return p && typeof p[3] === "number" ? p[3] : null; };
+const cartLines = () => ITEMS.filter(i => S.cart[i.c] > 0).map(i => ({ i, q:S.cart[i.c], p:price(i.c) }));
+const cartTotal = () => cartLines().reduce((a, l) => a + (l.p || 0) * l.q, 0);
+const descPct = () => S.desc.modo === "contado" ? 15 : S.desc.modo === "otro" ? Math.max(0, Math.min(15, Number(S.desc.pct) || 0)) : 0;
+const neto = () => Math.round(cartTotal() * (100 - descPct())) / 100;
+const misClientes = () => S.rol === "total" ? S.clientes : S.rol === "vendedor" && S.yo ? S.clientes.filter(c => c.t === S.yo.tag) : [];
+const cartUnits = () => Object.values(S.cart).reduce((a, b) => a + b, 0);
+
+/* iconos de eje y fijación (los del catálogo) */
+function ico(k){
+  const st = 'fill="none" stroke="currentColor" stroke-width="2.6"', f = 'var(--icofill)';
+  const b = {
+    doble:`<path d="M11 8.2 A15 15 0 0 1 29 8.2 V31.8 A15 15 0 0 1 11 31.8 Z" fill="${f}" ${st}/>`,
+    media:`<path d="M26 6.1 A15 15 0 1 0 26 33.9 Z" fill="${f}" ${st}/>`,
+    rosca:`<rect x="3" y="15" width="8" height="10" fill="${f}" ${st}/><rect x="9" y="13" width="26" height="14" rx="1" fill="${f}" ${st}/><path d="M14 13l2 14M20 13l2 14M26 13l2 14" stroke="currentColor" stroke-width="1.8"/>`,
+    pasador:`<circle cx="20" cy="20" r="13" fill="${f}" ${st}/><rect x="1.5" y="17" width="37" height="6" rx="2" fill="var(--red)"/>`,
+    clip:`<rect x="3" y="14" width="30" height="12" rx="2" fill="${f}" ${st}/><path d="M27 8 C34 8 34 32 27 32" fill="none" stroke="var(--red)" stroke-width="3"/>`,
+    acople:`<path d="M20 4 L24 16 L36 20 L24 24 L20 36 L16 24 L4 20 L16 16 Z" fill="${f}" ${st}/>`
+  }[k];
+  return b ? `<svg viewBox="0 0 40 40" aria-hidden="true">${b}</svg>` : "";
+}
+function ejeChips(i){
+  let o = "";
+  const kf = {Rosca:"rosca",Pasador:"pasador",Clip:"clip","Acople estrella":"acople"}[i.fj] || "";
+  if(i.fj) o += `<span class="ej">${ico(kf)}Fijación ${esc(i.fj)}</span>`;
+  if(i.fj !== "Acople estrella"){
+    if(i.fo && i.fo !== "No aplica"){ const ks = i.fo.startsWith("Doble") ? "doble" : i.fo.startsWith("Media") ? "media" : /pasador/i.test(i.fo) ? "pasador" : ""; o += `<span class="ej">${ico(ks)}${i.fo.startsWith("Eje ") ? "" : "Eje "}${esc(i.fo)}</span>`; }
+    if(i.lg) o += `<span class="ej">Eje largo</span>`;
+  }
+  return o;
+}
+
+/* catálogo */
+function stockPill(c){
+  const s = stock(c); if(s == null) return "";
+  if(s <= 0) return `<span class="st no">Sin stock</span>`;
+  return `<span class="st ${s <= 2 ? "low" : "ok"} num">${s} disp.</span>`;
+}
+function buyHtml(c){
+  const q = S.cart[c] || 0, p = price(c);
+  const pr = p != null ? `<span class="pr bs num">${money(p)}</span>` : (S.precios ? `<span class="st no">Sin precio</span>` : "");
+  const ctl = q > 0
+    ? `<span class="stp"><button data-act="dec" data-c="${esc(c)}" aria-label="Quitar uno de ${esc(c)}">−</button><input class="num" id="q-${esc(c)}" type="number" inputmode="numeric" min="0" max="999" value="${q}" data-c="${esc(c)}" aria-label="Cantidad de ${esc(c)}"><button data-act="inc" data-c="${esc(c)}" aria-label="Agregar uno de ${esc(c)}">+</button></span>`
+    : `<button class="add" data-act="inc" data-c="${esc(c)}">AGREGAR</button>`;
+  return pr + stockPill(c) + ctl;
+}
+function cardHtml(i){
+  const ph = i.i1 ? `<img class="v1" loading="lazy" src="img/${esc(i.c)}.jpg" alt="${esc(i.c)}"${i.sc ? ` style="transform:scale(${i.sc})"` : ""}>` + (i.i2 ? `<img class="v2" loading="lazy" src="img/${esc(i.c)}_2.jpg" alt="">` : "") : `<span class="nof">FOTO<br>PRÓXIMAMENTE</span>`;
+  const tags = i.t.map(t => `<span class="tg">${esc(t)}</span>`).join("") + (i.s ? `<span class="tg">${esc(i.s)}</span>` : "") + i.x.map(a => BY[a] ? `<button class="tg asp" data-act="goto" data-c="${esc(a)}">${i.l === "aspas" ? "MOTOR" : "ASPA"} ${esc(a)} ›</button>` : `<span class="tg asp">${i.l === "aspas" ? "MOTOR" : "ASPA"} ${esc(a)}</span>`).join("");
+  return `<article class="cd${S.cart[i.c] ? " in" : ""}" id="cd-${esc(i.c)}">
+    <button class="ph" data-act="zoom" data-c="${esc(i.c)}" aria-label="Ampliar fotos de ${esc(i.c)}">${ph}</button>
+    <div><div class="cr"><div class="cod bs">${esc(i.c)}</div>${i.d ? `<span class="dia bs num">Ø ${cm(i.d)} cm</span>` : ""}</div><div class="b1 bs">${esc(i.b[0])}</div>${i.b.length > 1 ? `<div class="b2">+ ${esc(i.b.slice(1).join(" · "))}</div>` : ""}
+    <div class="chp">${ejeChips(i)}${tags}</div><div class="app">${esc(i.m)}</div></div>
+    <div class="buy" id="buy-${esc(i.c)}">${buyHtml(i.c)}</div></article>`;
+}
+function filtered(){
+  const words = norm(S.q).split(/\s+/).filter(Boolean);
+  return ITEMS.filter(i => i.l === S.linea && (!S.brand || i.b.includes(S.brand)) && words.every(w => i.k.includes(w)) && (!S.onlyStock || (stock(i.c) || 0) > 0));
+}
+function enOtras(){
+  const words = norm(S.q).split(/\s+/).filter(Boolean); if(!words.length) return "";
+  return LINEAS.filter(l => l.id !== S.linea).map(l => { const n = ITEMS.filter(i => i.l === l.id && words.every(w => i.k.includes(w))).length;
+    return n ? `<button class="oth" data-lin="${l.id}">${n} ${n === 1 ? "resultado" : "resultados"} en ${l.n} ›</button>` : ""; }).join("");
+}
+function renderGrid(){
+  const L = filtered(); let h = "", fam = null;
+  const grouped = !S.q && !S.brand;
+  for(const i of L){ if(grouped && i.f && i.f !== fam){ fam = i.f; h += `<h2 class="fam bs">${esc(fam)}</h2>`; } h += cardHtml(i); }
+  const ln = LIN[S.linea], tot = ITEMS.filter(i => i.l === S.linea).length;
+  $("grid").innerHTML = enOtras() + (h || `<div class="empty">Nada en ${ln.n} coincide con la búsqueda.<br>Prueba con otro código, marca o modelo.</div>`);
+  $("cnt").textContent = L.length === tot ? `${tot} ${ln.u2}` : `${L.length} de ${tot} ${ln.u2}`;
+}
+function renderBrands(){
+  const bs = [...new Set(ITEMS.filter(i => i.l === S.linea).flatMap(i => i.b))].filter(b => b !== "CARRO CHINO").sort();
+  $("brands").innerHTML = [["","TODAS"], ...bs.map(b => [b,b])].map(([v,l]) => `<button data-b="${esc(v)}" aria-pressed="${S.brand === v}">${esc(l)}</button>`).join("");
+}
+function renderLin(){
+  $("lin").innerHTML = LINEAS.map(l => `<button data-lin="${l.id}" aria-pressed="${S.linea === l.id}">${l.n}</button>`).join("");
+}
+function setLinea(id, q){
+  if(!LIN[id]) return; S.linea = id; S.brand = ""; if(q != null){ S.q = q; $("q").value = q; }
+  save(); renderLin(); renderBrands(); renderGrid(); window.scrollTo(0,0);
+}
+function renderSeg(){
+  $("segT").innerHTML = TARIFAS.map(([k,l]) => `<button data-t="${k}" aria-pressed="${S.tarifa === k}">${l}</button>`).join("");
+}
+function renderBar(){
+  const u = cartUnits(), n = cartLines().length, v = location.hash.replace("#","") || "catalogo";
+  $("bar").hidden = !(u > 0 && v === "catalogo");
+  $("barTxt").textContent = `${u} ${u === 1 ? "pieza" : "piezas"} · ${n} ${n === 1 ? "código" : "códigos"}`;
+  $("barTot").textContent = S.precios ? money(cartTotal()) : "";
+}
+function setQty(c, q, keepInput){
+  q = Math.max(0, Math.min(999, Math.floor(Number(q) || 0)));
+  const had = !!S.cart[c]; if(q > 0) S.cart[c] = q; else delete S.cart[c];
+  S.enviado = null; save();
+  const buy = $("buy-" + c), cd = $("cd-" + c);
+  if(buy && !(keepInput && had && q > 0)) buy.innerHTML = buyHtml(c);
+  if(cd) cd.classList.toggle("in", q > 0);
+  renderBar();
+}
+
+/* pedido */
+function orderText(o){
+  const L = o.lineas.map(l => `${l.q} x ${l.c}${l.p != null ? "  " + money(l.p) : ""}`).join("\n");
+  return `PEDIDO NTX (${o.tipo === "presupuesto" ? "presupuesto" : "pedido"})\nCliente: ${o.cliente ? (o.cliente.nuevo ? "CLIENTE NUEVO: " + (o.cliente.nombreNuevo || "").trim() : o.cliente.nombre) : "(sin cliente)"}\nTarifa: ${TNAME[o.tarifa] || o.tarifa}${o.desc ? "\nDescuento: " + o.desc + "%" + (o.contado ? " (contado)" : "") : ""}\n${L}${o.total ? "\nTotal: " + money(o.total) : ""}${o.por && o.por.nombre ? "\nVendedor: " + o.por.nombre : ""}${o.nota ? "\nNota: " + o.nota : ""}${EXT ? "\n#NTX1." + ref(o) : ""}`;
+}
+function ref(o){
+  const d = { v:1, id:o.id, k:o.por ? o.por.id : "", t:o.creado, ci:o.cliente ? o.cliente.id : "", cn:o.cliente && o.cliente.nuevo ? (o.cliente.nombreNuevo || "").trim() : "", tp:o.tipo === "presupuesto" ? "q" : "p",
+    tf:o.tarifa, d:o.desc || 0, c:o.contado ? 1 : 0, n:o.nota || "", l:o.lineas.map(x => x.c + "*" + x.q).join(",") };
+  const b = new TextEncoder().encode(JSON.stringify(d)); let s = ""; b.forEach(x => s += String.fromCharCode(x));
+  return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+const waHref = o => "https://wa.me/?text=" + encodeURIComponent(orderText(o));
+const sendHref = o => SCRIPT_URL ? SCRIPT_URL + "?p=" + ref(o) : waHref(o);
+function buildOrder(){
+  const lines = cartLines();
+  const now = new Date().toISOString();
+  return { id:now.replace(/[-:T]/g,"").slice(0,14) + "-" + Math.random().toString(36).slice(2,6), creado:now, estado:EXT ? "enviado" : "nuevo", tipo:S.tipo, tarifa:S.tarifa, cliente:S.cliente, nota:S.nota.trim(),
+           lineas:lines.map(l => ({ c:l.i.c, q:l.q, p:l.p })), subtotal:Math.round(cartTotal()*100)/100, desc:descPct(), contado:S.desc.modo === "contado", total:neto(), unidades:cartUnits(),
+           por:S.yo ? { id:S.yo.id || "", nombre:S.yo.nombre || "", tag:S.yo.tag || "" } : null, holded:"", obs:"" };
+}
+function renderPed(){
+  const el = $("vPed");
+  if(S.enviado && EXT){
+    el.innerHTML = `<h2 class="bs">Pedido enviado</h2>
+      <div class="okb"><b>${esc(cname(S.enviado.cliente))} · ${S.enviado.unidades} ${S.enviado.unidades === 1 ? "pieza" : "piezas"} · ${money(S.enviado.total)}</b>${SCRIPT_URL ? "Se abrió una pestaña que debe decir «Pedido recibido». Si no la viste, reenvíalo por WhatsApp con el botón de abajo." : "Se abrió WhatsApp con el pedido listo: envíaselo a Mango. Si no se abrió, toca el botón de abajo o copia el resumen."}</div>
+      <a class="ghost" href="${esc(waHref(S.enviado))}" target="_blank" rel="noopener">Enviar por WhatsApp</a>
+      <div class="box"><span class="lbl">Resumen</span><pre class="copy" id="cp">${esc(orderText(S.enviado))}</pre><button class="ghost" data-act="copy">Copiar resumen</button></div>
+      <button class="send" data-act="nuevo">HACER OTRO PEDIDO</button>`;
+    return;
+  }
+  if(S.enviado){
+    el.innerHTML = `<h2 class="bs">Pedido guardado</h2>
+      <div class="okb"><b>${esc(cname(S.enviado.cliente))} · ${S.enviado.unidades} ${S.enviado.unidades === 1 ? "pieza" : "piezas"} · ${money(S.enviado.total)}</b>Claude lo pasa a Holded en su próxima revisión (cada hora, de lunes a sábado de 7 a 6): confirma el stock y crea el documento. El número aparece en Enviados.</div>
+      <div class="box"><span class="lbl">Resumen</span><pre class="copy" id="cp">${esc(orderText(S.enviado))}</pre><button class="ghost" data-act="copy">Copiar resumen</button></div>
+      <button class="send" data-act="nuevo">HACER OTRO PEDIDO</button>`;
+    return;
+  }
+  const lines = cartLines();
+  if(!lines.length){ el.innerHTML = `<h2 class="bs">Tu pedido</h2><div class="box"><p class="hint">Todavía no has agregado piezas. Vuelve al catálogo y toca AGREGAR en las que necesites.</p></div><button class="send" data-act="cat">IR AL CATÁLOGO</button>`; return; }
+  const cl = S.cliente && S.cliente.nuevo
+    ? `<div class="sel"><span>Cliente nuevo<small>Llega a Holded a nombre de CLIENTE NUEVO y administración lo registra.</small></span><button class="txt" data-act="clx">Cambiar</button></div>
+       <input class="fld" id="cn" type="text" autocomplete="off" placeholder="Nombre del cliente nuevo" value="${esc(S.cliente.nombreNuevo || "")}" aria-label="Nombre del cliente nuevo">
+       <p class="hint">Envía su RIF y su teléfono a administración por WhatsApp para que creen la ficha del cliente.</p>`
+    : S.cliente
+    ? `<div class="sel"><span>${esc(S.cliente.nombre)}${S.cliente.tag ? `<small>#${esc(S.cliente.tag)}</small>` : ""}</span><button class="txt" data-act="clx">Cambiar</button></div>`
+    : `<input class="fld" id="cq" type="search" autocomplete="off" placeholder="${S.rol === "cargando" || (S.rol === "total" && !S.clientes.length) ? "Cargando clientes…" : "Escribe el nombre del cliente"}" value="${esc(S.cq)}" aria-label="Buscar cliente"><div id="sug"></div>${S.nuevo ? `<button class="ghost" data-act="clnew">Cliente nuevo, aún no registrado</button>` : ""}`;
+  const ls = lines.map(({i,q,p}) => { const s = stock(i.c); const w = s != null && q > s ? `<div class="w">Pides ${q} y hay ${Math.max(0,s)} en stock</div>` : "";
+    return `<div class="ln"><div><div class="c bs">${esc(i.c)}</div><div class="d">${esc(i.b[0])} · ${esc(i.m)}</div>${w}</div>
+      <span class="stp"><button data-act="dec" data-c="${esc(i.c)}" aria-label="Quitar uno de ${esc(i.c)}">−</button><input class="num" id="pq-${esc(i.c)}" type="number" inputmode="numeric" min="0" max="999" value="${q}" data-c="${esc(i.c)}" aria-label="Cantidad de ${esc(i.c)}"><button data-act="inc" data-c="${esc(i.c)}" aria-label="Agregar uno de ${esc(i.c)}">+</button></span>
+      <div class="m num"><span>${p != null ? money(p) + " c/u" : "Sin precio en esta tarifa"}</span><button class="txt" data-act="del" data-c="${esc(i.c)}">Quitar</button><b>${p != null ? money(p*q) : "—"}</b></div></div>`; }).join("");
+  const can = canSend();
+  el.innerHTML = `<h2 class="bs">Tu pedido</h2>
+    <div class="box"><span class="lbl">Cliente</span>${cl}</div>
+    <div class="box"><div class="two">
+      <div><span class="lbl">Documento</span><div class="seg" role="group" aria-label="Documento">${[["pedido","Pedido"],["presupuesto","Presupuesto"]].map(([k,l]) => `<button data-tipo="${k}" aria-pressed="${S.tipo === k}">${l}</button>`).join("")}</div></div>
+      <div><span class="lbl">Tarifa</span><div class="seg" role="group" aria-label="Tarifa">${TARIFAS.map(([k,l]) => `<button data-t="${k}" aria-pressed="${S.tarifa === k}">${l}</button>`).join("")}</div></div>
+      <div><span class="lbl">Descuento</span><div class="dsc"><div class="seg" role="group" aria-label="Descuento">${[["no","Sin descuento"],["contado","Contado 15%"],["otro","Otro"]].map(([k,l]) => `<button data-desc="${k}" aria-pressed="${S.desc.modo === k}">${l}</button>`).join("")}</div>
+        ${S.desc.modo === "otro" ? `<label class="pct"><input class="fld num" id="dp" type="number" inputmode="numeric" min="1" max="15" step="1" value="${descPct()}" aria-label="Porcentaje de descuento"> %<small>máximo 15</small></label>` : ""}</div></div>
+    </div></div>
+    <div class="box"><span class="lbl">Piezas</span><div>${ls}</div>
+      <div class="sum"><span class="lbl">${cartUnits()} ${cartUnits() === 1 ? "pieza" : "piezas"} · total</span><b class="bs num">${S.precios ? money(neto()) : "—"}</b></div>
+      ${S.precios && descPct() ? `<p class="hint num" style="text-align:right">Subtotal ${money(cartTotal())} · ${S.desc.modo === "contado" ? "contado" : "descuento"} ${descPct()}%: −${money(cartTotal() - neto())}</p>` : ""}</div>
+    <div class="box"><label class="lbl" for="nota">${EXT ? "Nota (opcional)" : "Nota para Claude (opcional)"}</label><textarea class="fld" id="nota" placeholder="Ej.: despachar el viernes, entregar en la sucursal">${esc(S.nota)}</textarea></div>
+    ${S.err ? `<div class="msg">${esc(S.err)}</div>` : ""}
+    ${EXT ? (can ? `<a class="send" id="sendA" href="${esc(sendHref(buildOrder()))}" target="_blank" rel="noopener" data-act="vsend">${SCRIPT_URL ? "ENVIAR PEDIDO" : "ENVIAR POR WHATSAPP"}</a>` : `<button class="send" disabled>${SCRIPT_URL ? "ENVIAR PEDIDO" : "ENVIAR POR WHATSAPP"}</button>`)
+      : `<button class="send" data-act="send" ${can ? "" : "disabled"}>${S.sending ? "GUARDANDO…" : "ENVIAR PEDIDO A CLAUDE"}</button>`}
+    <p class="hint" id="sendHint">${sendHint()}</p>
+    ${db || EXT ? "" : `<div class="box"><pre class="copy" id="cp">${esc(orderText(buildOrder()))}</pre><button class="ghost" data-act="copy">Copiar resumen</button></div>`}
+    <button class="ghost" data-act="vaciar">Vaciar pedido</button>`;
+  if(!S.cliente) renderSug();
+}
+const nombreOk = () => !S.cliente || !S.cliente.nuevo || !!(S.cliente.nombreNuevo || "").trim();
+const canSend = () => !!(listo() && S.cliente && nombreOk() && !S.sending);
+function sendHint(){
+  if(EXT) return !listo() ? "Ingresa tu código de vendedor en el catálogo para poder enviar." : !S.cliente ? "Elige el cliente para poder enviar." : !nombreOk() ? "Escribe el nombre del cliente nuevo para poder enviar."
+    : SCRIPT_URL ? "Al enviar se abre una pestaña que confirma «Pedido recibido»." : "Al enviar se abre WhatsApp con el pedido listo para mandárselo a Mango.";
+  if(db && S.rol === "pendiente") return "Tu acceso como vendedor aún no está activado. Avísale a Mango.";
+  return !S.cliente ? "Elige el cliente para poder enviar." : !nombreOk() ? "Escribe el nombre del cliente nuevo para poder enviar."
+    : db ? "El pedido queda guardado aquí y Claude lo pasa a Holded en su próxima revisión, que corre cada hora." : "Aquí no se puede guardar el pedido. Copia el resumen y pégaselo a Claude en el chat.";
+}
+function renderSug(){
+  const box = $("sug"); if(!box) return;
+  const w = norm(S.cq).split(/\s+/).filter(Boolean);
+  if(!w.length){ box.innerHTML = ""; return; }
+  const L = misClientes().filter(c => w.every(x => c.k.includes(x))).slice(0, 8);
+  box.innerHTML = L.length ? `<div class="sug">${L.map(c => `<button data-cl="${esc(c.id)}"><span>${esc(c.n)}</span>${c.t ? `<em>#${esc(c.t)}</em>` : ""}</button>`).join("")}</div>` : `<p class="hint">${S.rol === "vendedor" ? "Ningún cliente tuyo con ese nombre. Si no es de tu cartera, envíalo como cliente nuevo." : "Ningún cliente con ese nombre en Holded."}</p>`;
+}
+async function send(){
+  if(!canSend()) return;
+  const o = buildOrder(); S.sending = true; S.err = ""; renderPed();
+  try{
+    const id = o.creado.replace(/[-:T]/g,"").slice(0,14) + "-" + Math.random().toString(36).slice(2,6);
+    await db.doc("pedidos/" + id).set(o);
+    S.enviado = o; S.cart = {}; S.nota = ""; S.cliente = null; S.cq = ""; S.desc = {modo:"no",pct:10}; save(); renderGrid();
+  }catch(e){ S.err = "No se pudo guardar el pedido (" + ((e && e.code) || "error") + "). Revisa la conexión y vuelve a tocar Enviar."; }
+  S.sending = false; renderPed(); renderBar(); window.scrollTo(0,0);
+}
+
+/* enviados */
+function renderEnv(){
+  const el = $("vEnv"); let h = `<h2 class="bs">Pedidos enviados</h2>`;
+  if(EXT && !(S.pedidos || []).length) h += `<div class="box"><p class="hint">Aún no has enviado pedidos desde este teléfono. Los que envíes quedan anotados aquí.</p></div>`;
+  else if(!db && S.dbOk === false && !EXT) h += `<div class="box"><p class="hint">Aquí no se pueden ver los pedidos guardados.</p></div>`;
+  else if(S.pedidos == null) h += `<div class="box"><p class="hint">Cargando pedidos…</p></div>`;
+  else if(!S.pedidos.length) h += `<div class="box"><p class="hint">Aún no hay pedidos. Los que envíes desde el catálogo aparecen aquí con su estado: por procesar o ya creado en Holded.</p></div>`;
+  else if(!verPed().length) h += `<div class="box"><p class="hint">Aún no hay pedidos. Los que envíes desde el catálogo aparecen aquí con su estado: por procesar o ya creado en Holded.</p></div>`;
+  else h += verPed().map(o => { const d = new Date(o.creado);
+    const st = o.estado === "holded" ? `<span class="st ok">En Holded${o.holded ? " · " + esc(o.holded) : ""}</span>` : o.estado === "revisar" ? `<span class="st low">Por revisar</span>` : o.estado === "procesando" ? `<span class="st no">Procesando…</span>` : o.estado === "enviado" ? `<span class="st ok">Enviado</span>` : `<span class="st no">Por procesar</span>`;
+    return `<article class="od"><div class="h"><b>${esc(cname(o.cliente))}</b>${st}</div>
+      <div class="i num">${isNaN(d) ? "" : d.toLocaleString("es-VE",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})} · ${o.tipo === "presupuesto" ? "Presupuesto" : "Pedido"} · tarifa ${esc(TNAME[o.tarifa] || o.tarifa)}${o.desc ? " · " + (o.contado ? "contado " : "descuento ") + Number(o.desc) + "%" : ""}${S.rol === "total" && o.por && o.por.nombre ? " · " + esc(o.por.nombre) : ""}</div>
+      <div class="i num">${(o.lineas || []).map(l => `${l.q} × ${esc(l.c)}`).join(" · ")}</div>
+      ${o.nota ? `<div class="i">Nota: ${esc(o.nota)}</div>` : ""}${o.obs ? `<div class="i" style="color:var(--warn)">Claude: ${esc(o.obs)}</div>` : ""}
+      <div class="f"><span class="pr bs num">${money(o.total || 0)}</span>${o.estado === "nuevo" ? (S.del === o.id ? `<button class="txt" data-act="delok" data-id="${esc(o.id)}">Sí, anular</button><button class="txt" data-act="delno" style="color:var(--mut)">No</button>` : `<button class="txt" data-act="delask" data-id="${esc(o.id)}">Anular</button>`) : ""}</div></article>`; }).join("");
+  if(S.esDueno && db){
+    const ids = [...new Set([...S.accesos.map(a => a.id), ...Object.keys(S.vend)])], tags = [...new Set(S.clientes.map(c => c.t).filter(x => x && !x.includes(",")))].sort();
+    h += `<h2 class="bs" style="margin-top:14px">Vendedores</h2><div class="box">` + (ids.length ? ids.map(id => { const a = S.accesos.find(x => x.id === id) || {}, v = S.vend[id] || {}, n = a.nombre || v.nombre || "Sin nombre";
+        return `<div class="vd"><span><b>${esc(n)}</b><small>${v.tag ? "Ve los clientes #" + esc(v.tag) : "Pendiente: aún no puede enviar pedidos"}</small></span>
+          <select class="fld" data-acc="${esc(id)}" data-n="${esc(n)}" aria-label="Cartera de ${esc(n)}"><option value="">Sin acceso</option>${tags.map(x => `<option value="${esc(x)}"${v.tag === x ? " selected" : ""}>#${esc(x)}</option>`).join("")}</select></div>`; }).join("")
+      : `<p class="hint">Cuando un vendedor abra esta página con su cuenta, aparece aquí para que le asignes su cartera de clientes.</p>`) + `</div>`;
+  }
+  if(EXT && S.rol === "vendedor") h += `<p class="hint">Sesión de ${esc(S.yo.nombre)}. Esta lista vive solo en este teléfono; el número de Holded lo confirma administración.</p><button class="ghost" data-act="salir">Cerrar sesión de vendedor</button>`;
+  el.innerHTML = h;
+}
+const verPed = () => (S.pedidos || []).filter(o => S.rol !== "vendedor" || (o.por && S.yo && o.por.id === S.yo.id));
+
+/* vistas por hash */
+function route(){
+  const v = ({pedido:"pedido", enviados:"enviados"})[location.hash.replace("#","")] || "catalogo";
+  $("vCat").hidden = v !== "catalogo"; $("vPed").hidden = v !== "pedido"; $("vEnv").hidden = v !== "enviados";
+  $("tools").hidden = v !== "catalogo"; $("btnBack").hidden = v === "catalogo"; $("btnEnv").hidden = v !== "catalogo";
+  $("lin").hidden = v !== "catalogo"; $("ttl").hidden = v === "catalogo"; $("ttl").textContent = v === "pedido" ? "PEDIDO" : "ENVIADOS";
+  if(v === "pedido") renderPed(); if(v === "enviados") renderEnv();
+  renderBar();
+}
+const go = h => { if(location.hash.replace("#","") === h) route(); else location.hash = h; window.scrollTo(0,0); };
+
+/* eventos */
+$("q").addEventListener("input", e => { S.q = e.target.value; renderGrid(); });
+$("brands").addEventListener("click", e => { const b = e.target.closest("button"); if(!b) return; S.brand = b.dataset.b; renderBrands(); renderGrid(); window.scrollTo(0,0); });
+$("onlyStock").addEventListener("change", e => { S.onlyStock = e.target.checked; save(); renderGrid(); });
+$("btnCart").addEventListener("click", () => go("pedido"));
+$("btnBack").addEventListener("click", () => go("catalogo"));
+$("btnEnv").addEventListener("click", () => go("enviados"));
+$("zClose").addEventListener("click", () => $("zoom").hidden = true);
+$("zoom").addEventListener("click", e => { if(e.target === $("zoom")) $("zoom").hidden = true; });
+document.addEventListener("keydown", e => { if(e.key === "Escape") $("zoom").hidden = true; });
+function setTarifa(t){ S.tarifa = t; save(); renderSeg(); renderGrid(); renderBar(); if(!$("vPed").hidden) renderPed(); }
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-t]"); if(t){ setTarifa(t.dataset.t); return; }
+  const li = e.target.closest("[data-lin]"); if(li){ setLinea(li.dataset.lin); return; }
+  const ds = e.target.closest("[data-desc]"); if(ds){ S.desc.modo = ds.dataset.desc; save(); renderPed(); return; }
+  const tp = e.target.closest("[data-tipo]"); if(tp){ S.tipo = tp.dataset.tipo; save(); renderPed(); return; }
+  const cl = e.target.closest("[data-cl]"); if(cl){ const c = S.clientes.find(x => x.id === cl.dataset.cl); if(c){ S.cliente = {id:c.id, nombre:c.n, tag:c.t || ""}; S.cq = ""; save(); renderPed(); } return; }
+  const a = e.target.closest("[data-act]"); if(!a) return;
+  const c = a.dataset.c, act = a.dataset.act, inPed = !$("vPed").hidden;
+  if(act === "inc"){ setQty(c, (S.cart[c] || 0) + 1); if(inPed) renderPed(); }
+  else if(act === "dec"){ setQty(c, (S.cart[c] || 0) - 1); if(inPed) renderPed(); }
+  else if(act === "del"){ setQty(c, 0); renderPed(); }
+  else if(act === "zoom"){ const i = BY[c]; if(!i || !i.i1) return; $("z1").src = `img/${c}.jpg`; $("z2").hidden = !i.i2; if(i.i2) $("z2").src = `img/${c}_2.jpg`; $("zoom").hidden = false; }
+  else if(act === "goto"){ const d = BY[c]; if(d) setLinea(d.l, c); }
+  else if(act === "clnew"){ S.cliente = { id:S.nuevo.id, nombre:S.nuevo.nombre, nuevo:true, nombreNuevo:S.cq.trim() }; S.cq = ""; save(); renderPed(); const f = $("cn"); if(f) f.focus(); }
+  else if(act === "clx"){ S.cliente = null; save(); renderPed(); const f = $("cq"); if(f) f.focus(); }
+  else if(act === "send") send();
+  else if(act === "vsend"){ if(!canSend()){ e.preventDefault(); return; } const o = buildOrder(); a.href = sendHref(o);
+    setTimeout(() => { S.pedidos = [o, ...(S.pedidos || [])].slice(0, 40); try{ localStorage.setItem(LSE, JSON.stringify(S.pedidos)); }catch(_){}
+      S.enviado = o; S.cart = {}; S.nota = ""; S.cliente = null; S.cq = ""; S.desc = {modo:"no",pct:10}; save(); renderGrid(); renderPed(); renderBar(); window.scrollTo(0,0); }, 500); }
+  else if(act === "salir"){ try{ localStorage.removeItem(LSC); }catch(_){} S.rol = "sincodigo"; S.yo = null; S.precios = null; S.clientes = []; S.nuevo = null; S.cliente = null; save(); codeUI(); renderGrid(); go("catalogo"); }
+  else if(act === "cat") go("catalogo");
+  else if(act === "nuevo"){ S.enviado = null; go("catalogo"); }
+  else if(act === "vaciar"){ if(a.dataset.sure){ S.cart = {}; save(); renderGrid(); go("catalogo"); } else { a.dataset.sure = "1"; a.textContent = "Toca otra vez para vaciar el pedido"; } }
+  else if(act === "copy"){ const txt = $("cp").textContent; const done = () => { a.textContent = "Copiado"; }; const sel = () => { const r = document.createRange(); r.selectNodeContents($("cp")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); a.textContent = "Texto seleccionado: cópialo"; };
+    try{ navigator.clipboard.writeText(txt).then(done, sel); }catch(_){ sel(); } }
+  else if(act === "delask"){ S.del = a.dataset.id; renderEnv(); }
+  else if(act === "delno"){ S.del = null; renderEnv(); }
+  else if(act === "delok"){ const id = a.dataset.id; S.del = null; if(db) db.doc("pedidos/" + id).delete().catch(() => {}); }
+});
+document.addEventListener("change", e => {
+  if(e.target.id === "dp"){ S.desc.pct = Math.max(1, Math.min(15, Math.round(Number(e.target.value) || 0))); save(); renderPed(); return; }
+  if(e.target.dataset && e.target.dataset.acc && S.esDueno && db){ const m = Object.assign({}, S.vend), id = e.target.dataset.acc;
+    if(e.target.value) m[id] = { tag:e.target.value, nombre:e.target.dataset.n || "" }; else delete m[id];
+    db.doc("datos/vendedores").set({ m }).catch(() => { renderEnv(); }); return; }
+  const c = e.target.dataset && e.target.dataset.c; if(e.target.matches(".stp input") && c){ setQty(c, e.target.value); if(!$("vPed").hidden) renderPed(); } });
+document.addEventListener("input", e => {
+  if(e.target.id === "cq"){ S.cq = e.target.value; renderSug(); }
+  else if(e.target.id === "cn" && S.cliente){ S.cliente.nombreNuevo = e.target.value; save(); const b = document.querySelector('[data-act="send"]'); if(b) b.disabled = !canSend(); const h = $("sendHint"); if(h) h.textContent = sendHint(); }
+  else if(e.target.id === "nota"){ S.nota = e.target.value; save(); }
+});
+window.addEventListener("hashchange", route);
+
+/* datos vivos: precios, stock, clientes y pedidos */
+function dataMsg(){
+  const m = $("dataMsg");
+  if(S.dbOk === false){ m.hidden = false; m.textContent = "Aquí no se pudieron cargar precios ni stock. Puedes armar el pedido y copiar el resumen para Claude."; }
+  else if(S.precios && S.fecha){ const d = new Date(S.fecha); m.hidden = true; $("cnt").title = "Precios y stock de Holded al " + d.toLocaleString("es-VE"); }
+  else m.hidden = true;
+}
+async function boot(){
+  let timer = setTimeout(() => { if(S.dbOk == null){ S.dbOk = false; dataMsg(); if(!$("vEnv").hidden) renderEnv(); } }, 10000);
+  try{ db = window.claude && window.claude.use ? await window.claude.use("db") : null; }catch(e){ db = null; }
+  if(!db){ clearTimeout(timer); S.dbOk = false; dataMsg(); route(); return; }
+  let user = null, uid = null, uname = "";
+  try{ user = window.claude.use ? await window.claude.use("user") : null; }catch(e){}
+  try{ if(user){ S.esDueno = !!(await user.isOwner()); uid = await user.id(); uname = (await user.name().catch(() => "")) || ""; } }catch(e){}
+  const setRol = () => {
+    if(!user || S.esDueno){ S.rol = "total"; S.yo = { id:uid || "", nombre:uname || "Mango", tag:"" }; }
+    else if(uid && S.vend[uid] && S.vend[uid].tag){ S.rol = "vendedor"; S.yo = { id:uid, nombre:uname || S.vend[uid].nombre || S.vend[uid].tag, tag:S.vend[uid].tag }; }
+    else { S.rol = "pendiente"; S.yo = { id:uid || "", nombre:uname, tag:"" }; }
+    $("accMsg").hidden = S.rol !== "pendiente";
+    if(S.cliente && !S.cliente.nuevo && S.rol === "vendedor" && S.clientes.length && !misClientes().some(c => c.id === S.cliente.id)){ S.cliente = null; save(); }
+    if(!$("vPed").hidden && !document.activeElement.matches("input,textarea")) renderPed(); if(!$("vEnv").hidden) renderEnv();
+  };
+  let registrado = false;
+  db.doc("datos/vendedores").onSnapshot(s => { const d = s.exists ? s.data() : null; S.vend = (d && d.m) || {}; setRol();
+      if(S.rol === "pendiente" && uid && !registrado){ registrado = true; db.doc("accesos/" + uid).set({ nombre:uname, visto:new Date().toISOString() }).catch(() => {}); } },
+    () => { setRol(); });
+  if(S.esDueno) db.collection("accesos").limit(50).onSnapshot(q => { S.accesos = q.docs.map(x => Object.assign({ id:x.id }, x.data())); if(!$("vEnv").hidden) renderEnv(); }, () => {});
+  if(!$("vPed").hidden) renderPed();
+  LINEAS.forEach(l => db.doc("datos/" + l.id).onSnapshot(s => { clearTimeout(timer); S.dbOk = true; const d = s.exists ? s.data() : null;
+      if(d && d.p){ S.pp[l.id] = d.p; S.fecha = d.fecha; } else delete S.pp[l.id];
+      const all = Object.assign({}, ...Object.values(S.pp)); S.precios = Object.keys(all).length ? all : null; dataMsg(); renderGrid(); route(); },
+    () => { clearTimeout(timer); if(S.dbOk == null){ S.dbOk = false; dataMsg(); } }));
+  db.doc("datos/clientes").onSnapshot(s => { const d = s.exists ? s.data() : null; S.nuevo = d && d.nuevo && d.nuevo.id ? d.nuevo : null; S.clientes = ((d && d.l) || []).map(c => ({ id:c[0], n:c[1], t:c[2] || "", k:norm(c[1] + " " + (c[2] || "") + " " + (c[3] || "")) })); if(!$("vPed").hidden && !S.cliente && !S.cq) renderPed(); }, () => {});
+  db.collection("pedidos").orderBy("creado","desc").limit(40).onSnapshot(q => { S.pedidos = q.docs.map(x => Object.assign({ id:x.id }, x.data())); if(!$("vEnv").hidden) renderEnv(); }, () => { S.pedidos = []; if(!$("vEnv").hidden) renderEnv(); });
+}
+$("onlyStock").checked = S.onlyStock;
+/* página de vendedores: sin base de datos; precios, stock y clientes vienen cifrados y se abren con el código */
+function codeUI(msg){
+  $("codeBox").hidden = S.rol === "vendedor";
+  if(msg) $("codeTxt").textContent = msg;
+}
+async function unlock(code){
+  const c = String(code || "").toUpperCase().replace(/[^A-Z0-9]/g,"");
+  if(!c) return false;
+  if(!(window.crypto && crypto.subtle)){ codeUI("Este navegador no puede abrir el catálogo con código. Prueba con Chrome o Safari actualizados."); return false; }
+  const b = s => Uint8Array.from(atob(s), x => x.charCodeAt(0));
+  for(const v of VEND){
+    try{
+      const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(c), "PBKDF2", false, ["deriveKey"]);
+      const key = await crypto.subtle.deriveKey({ name:"PBKDF2", salt:b(v.s), iterations:150000, hash:"SHA-256" }, km, { name:"AES-GCM", length:256 }, false, ["decrypt"]);
+      const d = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name:"AES-GCM", iv:b(v.i) }, key, b(v.d))));
+      S.precios = d.p; S.fecha = d.fecha; S.nuevo = d.nuevo || null; S.rol = "vendedor"; S.yo = { id:d.v.k, nombre:d.v.nombre, tag:d.v.tag };
+      S.clientes = (d.cl || []).map(x => ({ id:x[0], n:x[1], t:x[2] || "", k:norm(x[1] + " " + (x[2] || "") + " " + (x[3] || "")) }));
+      if(S.cliente && !S.cliente.nuevo && !S.clientes.some(x => x.id === S.cliente.id)){ S.cliente = null; save(); }
+      try{ localStorage.setItem(LSC, c); }catch(_){}
+      codeUI(); renderGrid(); route(); return true;
+    }catch(e){}
+  }
+  return false;
+}
+async function bootVend(){
+  S.rol = "sincodigo"; try{ S.pedidos = JSON.parse(localStorage.getItem(LSE) || "[]") || []; }catch(e){ S.pedidos = []; }
+  codeUI(); route();
+  const go1 = async () => { const b = $("codeGo"); b.disabled = true; b.textContent = "…"; const ok = await unlock($("code").value); b.disabled = false; b.textContent = "ENTRAR"; if(!ok && S.rol !== "vendedor") codeUI("Ese código no abre el catálogo. Revísalo y vuelve a intentar."); };
+  $("codeGo").addEventListener("click", go1); $("code").addEventListener("keydown", e => { if(e.key === "Enter") go1(); });
+  let saved = ""; try{ saved = localStorage.getItem(LSC) || ""; }catch(e){}
+  if(saved) await unlock(saved);
+}
+renderLin(); renderBrands(); renderSeg(); renderGrid(); route(); if(EXT) bootVend(); else boot();
+</script>
+</body></html>
