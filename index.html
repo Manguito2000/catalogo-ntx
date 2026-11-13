@@ -49,6 +49,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .scroller{overflow-x:auto;scrollbar-width:none;margin-inline:calc(-1*max(16px,env(safe-area-inset-left,0px))) calc(-1*max(16px,env(safe-area-inset-right,0px)))}
 .scroller::-webkit-scrollbar{display:none}
 @media (hover:hover) and (pointer:fine){.scroller{cursor:grab}.scroller.drag{cursor:grabbing;user-select:none}.scroller.drag button{pointer-events:none}}
+.stp button:disabled{opacity:.35;cursor:not-allowed}
 .add:disabled{background:var(--off-bg);color:var(--off);cursor:not-allowed}
 .chips{display:flex;gap:6px;padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));width:max-content}
 .chips button{font-family:var(--display);font-weight:700;font-size:17px;letter-spacing:.02em;padding:6px 11px;border-radius:8px;border:1.5px solid #55575C;color:var(--band-ink);white-space:nowrap}
@@ -247,8 +248,12 @@ const stock = c => { const p = S.precios && S.precios[c]; if(!(p && typeof p[3] 
 /* cantidad válida: en líneas con paso (de 4 en 4) se ajusta al múltiplo; uno por encima baja, dos o más sube; mínimo un paso */
 /* sin stock (stock conocido y en 0 o menos): no se puede pedir */
 const sinStock = c => { const s = stock(c); return s != null && s <= 0; };
+/* tope de pedido: lo disponible en stock (en líneas con paso, el múltiplo que cabe); sin stock conocido no hay tope */
+const tope = c => { const s = stock(c); if(s == null) return 999; const k = paso(c); return Math.max(0, Math.floor(s / k) * k); };
 /* saca del pedido lo que se quedó sin stock (pedido guardado de antes o stock refrescado) */
-function purgaSinStock(){ const q = Object.keys(S.cart).filter(sinStock); if(!q.length) return; q.forEach(c => delete S.cart[c]); S.quit = [...new Set([...(S.quit || []), ...q])]; save(); renderBar(); }
+function purgaSinStock(){ const q = [], aj = [];
+  Object.keys(S.cart).forEach(c => { const t = tope(c); if(sinStock(c) || (t <= 0 && stock(c) != null)){ delete S.cart[c]; q.push(c); } else if(S.cart[c] > t){ S.cart[c] = t; aj.push(c); } });
+  if(!q.length && !aj.length) return; S.quit = [...new Set([...(S.quit || []), ...q])]; S.ajus = [...new Set([...(S.ajus || []), ...aj])].filter(c => S.cart[c]); save(); renderBar(); }
 const ajusta = (c, q) => { const s = paso(c); if(s <= 1 || q <= 0) return q; const r = q % s; return Math.max(s, r === 0 ? q : r * 4 <= s ? q - r : q - r + s); };
 const head = i => i.h || i.b[0] || "";
 const img = (c, sfx) => "img/" + encodeURIComponent(c) + (sfx || "") + ".jpg";
@@ -293,7 +298,7 @@ function buyHtml(c){
   const q = S.cart[c] || 0, p = price(c);
   const pr = p != null ? `<span class="pr bs num">${money(p)}</span>` : (S.precios ? `<span class="st no">Sin precio</span>` : "");
   const ctl = q > 0
-    ? `<span class="stp"><button data-act="dec" data-c="${esc(c)}" aria-label="Quitar uno de ${esc(c)}">−</button><input class="num" id="q-${esc(c)}" type="number" inputmode="numeric" min="0" max="999" value="${q}" data-c="${esc(c)}" aria-label="Cantidad de ${esc(c)}"><button data-act="inc" data-c="${esc(c)}" aria-label="Agregar uno de ${esc(c)}">+</button></span>`
+    ? `<span class="stp"><button data-act="dec" data-c="${esc(c)}" aria-label="Quitar uno de ${esc(c)}">−</button><input class="num" id="q-${esc(c)}" type="number" inputmode="numeric" min="0" max="999" value="${q}" data-c="${esc(c)}" aria-label="Cantidad de ${esc(c)}"><button data-act="inc" data-c="${esc(c)}" aria-label="Agregar uno de ${esc(c)}"${q + paso(c) > tope(c) ? " disabled title=\"Es todo lo disponible\"" : ""}>+</button></span>`
     : sinStock(c) ? `<button class="add" disabled aria-label="${esc(c)} sin stock: no se puede pedir">AGREGAR</button>`
     : `<button class="add" data-act="inc" data-c="${esc(c)}">AGREGAR${paso(c) > 1 ? " " + paso(c) : ""}</button>`;
   return pr + stockPill(c) + ctl;
@@ -351,6 +356,7 @@ function setQty(c, q, keepInput){
   q = Math.max(0, Math.min(999, Math.floor(Number(q) || 0)));
   if(q > 0 && sinStock(c)){ q = 0; keepInput = false; }
   const q0 = q; q = ajusta(c, q); if(q !== q0) keepInput = false; if(q > 999) q -= paso(c);
+  const t = tope(c); if(q > t){ q = t; keepInput = false; }
   const had = !!S.cart[c]; if(q > 0) S.cart[c] = q; else delete S.cart[c];
   S.enviado = null; save();
   const buy = $("buy-" + c), cd = $("cd-" + c);
@@ -407,7 +413,7 @@ function renderPed(){
     : `<input class="fld" id="cq" type="search" autocomplete="off" placeholder="${S.rol === "cargando" || (S.rol === "total" && !S.clientes.length) ? "Cargando clientes…" : "Escribe el nombre del cliente"}" value="${esc(S.cq)}" aria-label="Buscar cliente"><div id="sug"></div>${S.nuevo ? `<button class="ghost" data-act="clnew">Cliente nuevo, aún no registrado</button>` : ""}`;
   const ls = lines.map(({i,q,p}) => { const s = stock(i.c); const w = s != null && q > s ? `<div class="w">Pides ${q} y hay ${Math.max(0,s)} en stock</div>` : "";
     return `<div class="ln"><div><div class="c bs">${esc(i.c)}</div><div class="d">${esc([head(i), i.m].filter(Boolean).join(" · "))}</div>${w}</div>
-      <span class="stp"><button data-act="dec" data-c="${esc(i.c)}" aria-label="Quitar uno de ${esc(i.c)}">−</button><input class="num" id="pq-${esc(i.c)}" type="number" inputmode="numeric" min="0" max="999" value="${q}" data-c="${esc(i.c)}" aria-label="Cantidad de ${esc(i.c)}"><button data-act="inc" data-c="${esc(i.c)}" aria-label="Agregar uno de ${esc(i.c)}">+</button></span>
+      <span class="stp"><button data-act="dec" data-c="${esc(i.c)}" aria-label="Quitar uno de ${esc(i.c)}">−</button><input class="num" id="pq-${esc(i.c)}" type="number" inputmode="numeric" min="0" max="999" value="${q}" data-c="${esc(i.c)}" aria-label="Cantidad de ${esc(i.c)}"><button data-act="inc" data-c="${esc(i.c)}" aria-label="Agregar uno de ${esc(i.c)}"${q + paso(i.c) > tope(i.c) ? " disabled title=\"Es todo lo disponible\"" : ""}>+</button></span>
       <div class="m num"><span>${p != null ? money(p) + " c/u" : "Sin precio en esta tarifa"}</span><button class="txt" data-act="del" data-c="${esc(i.c)}">Quitar</button><b>${p != null ? money(p*q) : "—"}</b></div></div>`; }).join("");
   const can = canSend();
   el.innerHTML = `<h2 class="bs">Tu pedido</h2>
@@ -423,6 +429,7 @@ function renderPed(){
       ${S.precios && descPct() ? `<p class="hint num" style="text-align:right">Subtotal ${money(cartTotal())} · ${S.desc.modo === "contado" ? "contado" : "descuento"} ${descPct()}%: −${money(cartTotal() - neto())}</p>` : ""}</div>
     <div class="box"><label class="lbl" for="nota">${EXT ? "Nota (opcional)" : "Nota para Claude (opcional)"}</label><textarea class="fld" id="nota" placeholder="Ej.: despachar el viernes, entregar en la sucursal">${esc(S.nota)}</textarea></div>
     ${(S.quit || []).length ? `<div class="msg">Se quitaron del pedido por no tener stock: ${S.quit.map(esc).join(", ")}.</div>` : ""}
+    ${(S.ajus || []).length ? `<div class="msg">Se bajaron a lo disponible en stock: ${S.ajus.map(esc).join(", ")}.</div>` : ""}
     ${S.err ? `<div class="msg">${esc(S.err)}</div>` : ""}
     ${EXT ? (can ? `<a class="send" id="sendA" href="${esc(sendHref(buildOrder()))}" target="_blank" rel="noopener" data-act="vsend">${SCRIPT_URL ? "ENVIAR PEDIDO" : "ENVIAR POR WHATSAPP"}</a>` : `<button class="send" disabled>${SCRIPT_URL ? "ENVIAR PEDIDO" : "ENVIAR POR WHATSAPP"}</button>`)
       : `<button class="send" data-act="send" ${can ? "" : "disabled"}>${S.sending ? "GUARDANDO…" : "ENVIAR PEDIDO A CLAUDE"}</button>`}
@@ -548,8 +555,8 @@ document.addEventListener("click", e => {
       S.enviado = o; S.cart = {}; S.nota = ""; S.cliente = null; S.cq = ""; S.desc = {modo:"no",pct:10}; save(); renderGrid(); renderPed(); renderBar(); window.scrollTo(0,0); }, 500); }
   else if(act === "salir"){ try{ localStorage.removeItem(LSC); }catch(_){} S.rol = "sincodigo"; S.yo = null; S.precios = null; S.clientes = []; S.nuevo = null; S.cliente = null; save(); codeUI(); renderGrid(); go("catalogo"); }
   else if(act === "cat") go("catalogo");
-  else if(act === "nuevo"){ S.enviado = null; S.quit = []; go("catalogo"); }
-  else if(act === "vaciar"){ if(a.dataset.sure){ S.cart = {}; S.quit = []; save(); renderGrid(); go("catalogo"); } else { a.dataset.sure = "1"; a.textContent = "Toca otra vez para vaciar el pedido"; } }
+  else if(act === "nuevo"){ S.enviado = null; S.quit = []; S.ajus = []; go("catalogo"); }
+  else if(act === "vaciar"){ if(a.dataset.sure){ S.cart = {}; S.quit = []; S.ajus = []; save(); renderGrid(); go("catalogo"); } else { a.dataset.sure = "1"; a.textContent = "Toca otra vez para vaciar el pedido"; } }
   else if(act === "copy"){ const txt = $("cp").textContent; const done = () => { a.textContent = "Copiado"; }; const sel = () => { const r = document.createRange(); r.selectNodeContents($("cp")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); a.textContent = "Texto seleccionado: cópialo"; };
     try{ navigator.clipboard.writeText(txt).then(done, sel); }catch(_){ sel(); } }
   else if(act === "delask"){ S.del = a.dataset.id; renderEnv(); }
