@@ -48,6 +48,8 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .srch input:focus{border-color:var(--red);outline:none}
 .scroller{overflow-x:auto;scrollbar-width:none;margin-inline:calc(-1*max(16px,env(safe-area-inset-left,0px))) calc(-1*max(16px,env(safe-area-inset-right,0px)))}
 .scroller::-webkit-scrollbar{display:none}
+@media (hover:hover) and (pointer:fine){.scroller{cursor:grab}.scroller.drag{cursor:grabbing;user-select:none}.scroller.drag button{pointer-events:none}}
+.add:disabled{background:var(--off-bg);color:var(--off);cursor:not-allowed}
 .chips{display:flex;gap:6px;padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));width:max-content}
 .chips button{font-family:var(--display);font-weight:700;font-size:17px;letter-spacing:.02em;padding:6px 11px;border-radius:8px;border:1.5px solid #55575C;color:var(--band-ink);white-space:nowrap}
 .chips button[aria-pressed="true"]{background:var(--red);border-color:var(--red);color:var(--on-red)}
@@ -243,6 +245,10 @@ const paso = c => lin(c).paso || 1;
 /* stock disponible para pedir: en las líneas con "smin" (conectores), tener smin o menos cuenta como sin stock */
 const stock = c => { const p = S.precios && S.precios[c]; if(!(p && typeof p[3] === "number")) return null; return p[3] <= (lin(c).smin || 0) ? Math.min(p[3], 0) : p[3]; };
 /* cantidad válida: en líneas con paso (de 4 en 4) se ajusta al múltiplo; uno por encima baja, dos o más sube; mínimo un paso */
+/* sin stock (stock conocido y en 0 o menos): no se puede pedir */
+const sinStock = c => { const s = stock(c); return s != null && s <= 0; };
+/* saca del pedido lo que se quedó sin stock (pedido guardado de antes o stock refrescado) */
+function purgaSinStock(){ const q = Object.keys(S.cart).filter(sinStock); if(!q.length) return; q.forEach(c => delete S.cart[c]); S.quit = [...new Set([...(S.quit || []), ...q])]; save(); renderBar(); }
 const ajusta = (c, q) => { const s = paso(c); if(s <= 1 || q <= 0) return q; const r = q % s; return Math.max(s, r === 0 ? q : r * 4 <= s ? q - r : q - r + s); };
 const head = i => i.h || i.b[0] || "";
 const img = (c, sfx) => "img/" + encodeURIComponent(c) + (sfx || "") + ".jpg";
@@ -288,6 +294,7 @@ function buyHtml(c){
   const pr = p != null ? `<span class="pr bs num">${money(p)}</span>` : (S.precios ? `<span class="st no">Sin precio</span>` : "");
   const ctl = q > 0
     ? `<span class="stp"><button data-act="dec" data-c="${esc(c)}" aria-label="Quitar uno de ${esc(c)}">−</button><input class="num" id="q-${esc(c)}" type="number" inputmode="numeric" min="0" max="999" value="${q}" data-c="${esc(c)}" aria-label="Cantidad de ${esc(c)}"><button data-act="inc" data-c="${esc(c)}" aria-label="Agregar uno de ${esc(c)}">+</button></span>`
+    : sinStock(c) ? `<button class="add" disabled aria-label="${esc(c)} sin stock: no se puede pedir">AGREGAR</button>`
     : `<button class="add" data-act="inc" data-c="${esc(c)}">AGREGAR${paso(c) > 1 ? " " + paso(c) : ""}</button>`;
   return pr + stockPill(c) + ctl;
 }
@@ -342,6 +349,7 @@ function renderBar(){
 }
 function setQty(c, q, keepInput){
   q = Math.max(0, Math.min(999, Math.floor(Number(q) || 0)));
+  if(q > 0 && sinStock(c)){ q = 0; keepInput = false; }
   const q0 = q; q = ajusta(c, q); if(q !== q0) keepInput = false; if(q > 999) q -= paso(c);
   const had = !!S.cart[c]; if(q > 0) S.cart[c] = q; else delete S.cart[c];
   S.enviado = null; save();
@@ -389,7 +397,7 @@ function renderPed(){
     return;
   }
   const lines = cartLines();
-  if(!lines.length){ el.innerHTML = `<h2 class="bs">Tu pedido</h2><div class="box"><p class="hint">Todavía no has agregado piezas. Vuelve al catálogo y toca AGREGAR en las que necesites.</p></div><button class="send" data-act="cat">IR AL CATÁLOGO</button>`; return; }
+  if(!lines.length){ el.innerHTML = `<h2 class="bs">Tu pedido</h2>${(S.quit || []).length ? `<div class="msg">Se quitaron del pedido por no tener stock: ${S.quit.map(esc).join(", ")}.</div>` : ""}<div class="box"><p class="hint">Todavía no has agregado piezas. Vuelve al catálogo y toca AGREGAR en las que necesites.</p></div><button class="send" data-act="cat">IR AL CATÁLOGO</button>`; return; }
   const cl = S.cliente && S.cliente.nuevo
     ? `<div class="sel"><span>Cliente nuevo<small>Llega a Holded a nombre de CLIENTE NUEVO y administración lo registra.</small></span><button class="txt" data-act="clx">Cambiar</button></div>
        <input class="fld" id="cn" type="text" autocomplete="off" placeholder="Nombre del cliente nuevo" value="${esc(S.cliente.nombreNuevo || "")}" aria-label="Nombre del cliente nuevo">
@@ -414,6 +422,7 @@ function renderPed(){
       <div class="sum"><span class="lbl">${cartUnits()} ${cartUnits() === 1 ? "pieza" : "piezas"} · total</span><b class="bs num">${S.precios ? money(neto()) : "—"}</b></div>
       ${S.precios && descPct() ? `<p class="hint num" style="text-align:right">Subtotal ${money(cartTotal())} · ${S.desc.modo === "contado" ? "contado" : "descuento"} ${descPct()}%: −${money(cartTotal() - neto())}</p>` : ""}</div>
     <div class="box"><label class="lbl" for="nota">${EXT ? "Nota (opcional)" : "Nota para Claude (opcional)"}</label><textarea class="fld" id="nota" placeholder="Ej.: despachar el viernes, entregar en la sucursal">${esc(S.nota)}</textarea></div>
+    ${(S.quit || []).length ? `<div class="msg">Se quitaron del pedido por no tener stock: ${S.quit.map(esc).join(", ")}.</div>` : ""}
     ${S.err ? `<div class="msg">${esc(S.err)}</div>` : ""}
     ${EXT ? (can ? `<a class="send" id="sendA" href="${esc(sendHref(buildOrder()))}" target="_blank" rel="noopener" data-act="vsend">${SCRIPT_URL ? "ENVIAR PEDIDO" : "ENVIAR POR WHATSAPP"}</a>` : `<button class="send" disabled>${SCRIPT_URL ? "ENVIAR PEDIDO" : "ENVIAR POR WHATSAPP"}</button>`)
       : `<button class="send" data-act="send" ${can ? "" : "disabled"}>${S.sending ? "GUARDANDO…" : "ENVIAR PEDIDO A CLAUDE"}</button>`}
@@ -423,7 +432,7 @@ function renderPed(){
   if(!S.cliente) renderSug();
 }
 const nombreOk = () => !S.cliente || !S.cliente.nuevo || !!(S.cliente.nombreNuevo || "").trim();
-const canSend = () => !!(listo() && S.cliente && nombreOk() && !S.sending);
+const canSend = () => !!(listo() && S.cliente && nombreOk() && !S.sending && !cartLines().some(l => sinStock(l.i.c)));
 function sendHint(){
   if(EXT) return !listo() ? "Ingresa tu código de vendedor en el catálogo para poder enviar." : !S.cliente ? "Elige el cliente para poder enviar." : !nombreOk() ? "Escribe el nombre del cliente nuevo para poder enviar."
     : SCRIPT_URL ? "Al enviar se abre una pestaña que confirma «Pedido recibido»." : "Al enviar se abre WhatsApp con el pedido listo para mandárselo a Mango.";
@@ -477,15 +486,35 @@ function renderEnv(){
 const verPed = () => (S.pedidos || []).filter(o => S.rol !== "vendedor" || (o.por && S.yo && o.por.id === S.yo.id));
 
 /* vistas por hash */
+/* al salir del catálogo se guarda la pieza que estaba arriba en pantalla; al volver, la página queda otra vez en esa pieza */
+try{ history.scrollRestoration = "manual"; }catch(_){}
+let VISTA = null, POS = null;
+function guardaPos(){
+  const hb = document.querySelector("header.top").getBoundingClientRect().bottom;
+  const cd = [...$("grid").querySelectorAll(".cd")].find(x => x.getBoundingClientRect().bottom > hb + 8);
+  POS = { y:window.scrollY, c:cd ? cd.id : "", off:cd ? cd.getBoundingClientRect().top : 0 };
+}
+function vuelvePos(){
+  if(!POS) return; const p = POS;
+  const f = () => { const el = p.c && document.getElementById(p.c); if(el) window.scrollBy(0, el.getBoundingClientRect().top - p.off); else window.scrollTo(0, p.y); };
+  f(); requestAnimationFrame(f); setTimeout(f, 120);
+}
 function route(){
   const v = ({pedido:"pedido", enviados:"enviados"})[location.hash.replace("#","")] || "catalogo";
+  const prev = VISTA; VISTA = v;
   $("vCat").hidden = v !== "catalogo"; $("vPed").hidden = v !== "pedido"; $("vEnv").hidden = v !== "enviados";
   $("tools").hidden = v !== "catalogo"; $("btnBack").hidden = v === "catalogo"; $("btnEnv").hidden = v !== "catalogo";
   $("lin").hidden = v !== "catalogo"; $("ttl").hidden = v === "catalogo"; $("ttl").textContent = v === "pedido" ? "PEDIDO" : "ENVIADOS";
   if(v === "pedido") renderPed(); if(v === "enviados") renderEnv();
   renderBar();
+  if(v === "catalogo" && prev && prev !== "catalogo") vuelvePos();
 }
-const go = h => { if(location.hash.replace("#","") === h) route(); else location.hash = h; window.scrollTo(0,0); };
+const go = h => {
+  const cur = VISTA || "catalogo";
+  if(cur === "catalogo" && h !== "catalogo") guardaPos();
+  if(h !== "catalogo" || cur === "catalogo") window.scrollTo(0,0);
+  if(location.hash.replace("#","") === h) route(); else location.hash = h;
+};
 
 /* eventos */
 $("q").addEventListener("input", e => { S.q = e.target.value; renderGrid(); });
@@ -519,8 +548,8 @@ document.addEventListener("click", e => {
       S.enviado = o; S.cart = {}; S.nota = ""; S.cliente = null; S.cq = ""; S.desc = {modo:"no",pct:10}; save(); renderGrid(); renderPed(); renderBar(); window.scrollTo(0,0); }, 500); }
   else if(act === "salir"){ try{ localStorage.removeItem(LSC); }catch(_){} S.rol = "sincodigo"; S.yo = null; S.precios = null; S.clientes = []; S.nuevo = null; S.cliente = null; save(); codeUI(); renderGrid(); go("catalogo"); }
   else if(act === "cat") go("catalogo");
-  else if(act === "nuevo"){ S.enviado = null; go("catalogo"); }
-  else if(act === "vaciar"){ if(a.dataset.sure){ S.cart = {}; save(); renderGrid(); go("catalogo"); } else { a.dataset.sure = "1"; a.textContent = "Toca otra vez para vaciar el pedido"; } }
+  else if(act === "nuevo"){ S.enviado = null; S.quit = []; go("catalogo"); }
+  else if(act === "vaciar"){ if(a.dataset.sure){ S.cart = {}; S.quit = []; save(); renderGrid(); go("catalogo"); } else { a.dataset.sure = "1"; a.textContent = "Toca otra vez para vaciar el pedido"; } }
   else if(act === "copy"){ const txt = $("cp").textContent; const done = () => { a.textContent = "Copiado"; }; const sel = () => { const r = document.createRange(); r.selectNodeContents($("cp")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); a.textContent = "Texto seleccionado: cópialo"; };
     try{ navigator.clipboard.writeText(txt).then(done, sel); }catch(_){ sel(); } }
   else if(act === "delask"){ S.del = a.dataset.id; renderEnv(); }
@@ -539,6 +568,23 @@ document.addEventListener("input", e => {
   else if(e.target.id === "nota"){ S.nota = e.target.value; save(); }
 });
 window.addEventListener("hashchange", route);
+/* en PC, las barras de líneas y de marcas se mueven con la rueda del mouse o arrastrando, como con el dedo en el teléfono */
+document.querySelectorAll(".scroller").forEach(sc => {
+  sc.addEventListener("wheel", e => {
+    const max = sc.scrollWidth - sc.clientWidth; if(max <= 0 || e.ctrlKey) return;
+    let d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY; if(!d) return;
+    if(e.deltaMode === 1) d *= 32; else if(e.deltaMode === 2) d *= sc.clientWidth;
+    if((d < 0 && sc.scrollLeft <= 0) || (d > 0 && sc.scrollLeft >= max - 1)) return;
+    e.preventDefault(); sc.scrollLeft += d;
+  }, { passive:false });
+  let x0 = null, s0 = 0, moved = false;
+  sc.addEventListener("pointerdown", e => { if(e.pointerType !== "mouse" || e.button !== 0) return; x0 = e.clientX; s0 = sc.scrollLeft; moved = false; });
+  window.addEventListener("pointermove", e => { if(x0 == null) return; const dx = e.clientX - x0;
+    if(!moved && Math.abs(dx) > 6){ moved = true; sc.classList.add("drag"); } if(moved){ sc.scrollLeft = s0 - dx; e.preventDefault(); } });
+  window.addEventListener("pointerup", () => { if(x0 == null) return; x0 = null; sc.classList.remove("drag"); });
+  sc.addEventListener("click", e => { if(moved){ e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
+  sc.addEventListener("dragstart", e => e.preventDefault());
+});
 
 /* datos vivos: precios, stock, clientes y pedidos */
 function dataMsg(){
@@ -570,7 +616,7 @@ async function boot(){
   if(!$("vPed").hidden) renderPed();
   LINEAS.forEach(l => db.doc("datos/" + l.id).onSnapshot(s => { clearTimeout(timer); S.dbOk = true; const d = s.exists ? s.data() : null;
       if(d && d.p){ S.pp[l.id] = d.p; S.fecha = d.fecha; } else delete S.pp[l.id];
-      const all = Object.assign({}, ...Object.values(S.pp)); S.precios = Object.keys(all).length ? all : null; dataMsg(); renderGrid(); route(); },
+      const all = Object.assign({}, ...Object.values(S.pp)); S.precios = Object.keys(all).length ? all : null; purgaSinStock(); dataMsg(); renderGrid(); route(); },
     () => { clearTimeout(timer); if(S.dbOk == null){ S.dbOk = false; dataMsg(); } }));
   db.doc("datos/clientes").onSnapshot(s => { const d = s.exists ? s.data() : null; S.nuevo = d && d.nuevo && d.nuevo.id ? d.nuevo : null; S.clientes = ((d && d.l) || []).map(c => ({ id:c[0], n:c[1], t:c[2] || "", k:norm(c[1] + " " + (c[2] || "") + " " + (c[3] || "")) })); if(!$("vPed").hidden && !S.cliente && !S.cq) renderPed(); }, () => {});
   db.collection("pedidos").orderBy("creado","desc").limit(40).onSnapshot(q => { S.pedidos = q.docs.map(x => Object.assign({ id:x.id }, x.data())); if(!$("vEnv").hidden) renderEnv(); }, () => { S.pedidos = []; if(!$("vEnv").hidden) renderEnv(); });
@@ -596,7 +642,7 @@ async function unlock(code){
       S.clientes = (d.cl || []).map(x => ({ id:x[0], n:x[1], t:x[2] || "", k:norm(x[1] + " " + (x[2] || "") + " " + (x[3] || "")) }));
       if(S.cliente && !S.cliente.nuevo && !S.clientes.some(x => x.id === S.cliente.id)){ S.cliente = null; save(); }
       try{ localStorage.setItem(LSC, c); }catch(_){}
-      codeUI(); renderGrid(); route(); return true;
+      purgaSinStock(); codeUI(); renderGrid(); route(); return true;
     }catch(e){}
   }
   return false;
