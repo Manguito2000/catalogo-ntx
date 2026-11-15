@@ -1,0 +1,71 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Catálogo NTX</title><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#16161A"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icono-192.png"><link rel="apple-touch-icon" href="icono-180.png"><meta name="apple-mobile-web-app-title" content="NTX"><style>body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style></head><body><div id="acceso">
+<style>
+@font-face{font-family:"BSD";src:url("fonts/BSD.ttf") format("truetype");font-weight:100 900;font-display:swap}
+html,body{background:#0E0E10}
+#acceso{--red:#E3222C;--ink:#F2F3F5;--mut:#A9ACB3;--line:#2E3036;position:relative;min-height:100vh;min-height:100dvh;display:grid;place-items:center;overflow:hidden;
+  color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  padding:max(24px,env(safe-area-inset-top,0px)) max(20px,env(safe-area-inset-right,0px)) max(24px,env(safe-area-inset-bottom,0px)) max(20px,env(safe-area-inset-left,0px));
+  background:radial-gradient(120% 70% at 85% 0%,#2A0C0F 0%,rgba(14,14,16,0) 60%),radial-gradient(90% 60% at 0% 100%,#1C1D22 0%,rgba(14,14,16,0) 70%),#0E0E10}
+#acceso *{box-sizing:border-box}
+#acceso .lineas{position:absolute;inset:0;pointer-events:none;opacity:.9}
+#acceso .caja{position:relative;width:100%;max-width:400px;display:grid;gap:26px}
+#acceso .logo{width:150px;height:auto;display:block}
+#acceso .ceja{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;letter-spacing:.22em;color:var(--mut);text-transform:uppercase}
+#acceso .ceja::before{content:"";width:28px;height:3px;background:var(--red);border-radius:2px}
+#acceso h1{margin:10px 0 0;font-family:"BSD","Arial Narrow","Roboto Condensed",Impact,sans-serif;font-weight:700;font-size:clamp(46px,13vw,64px);line-height:.92;letter-spacing:.01em;text-transform:uppercase}
+#acceso h1 span{color:var(--red)}
+#acceso .sub{margin:14px 0 0;color:var(--mut);font-size:15px;line-height:1.5;max-width:34ch}
+#acceso form{display:grid;gap:12px;padding:20px;border:1px solid var(--line);border-radius:16px;background:rgba(27,28,32,.72);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+#acceso label{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--mut);text-transform:uppercase}
+#acceso input{width:100%;height:54px;padding:0 16px;border-radius:11px;border:1.5px solid #3A3C43;background:#16171B;color:var(--ink);
+  font:600 17px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.08em;text-transform:uppercase;outline:none;transition:border-color .15s}
+#acceso input::placeholder{color:#6C6F77;letter-spacing:.04em;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:500;text-transform:none}
+#acceso input:focus{border-color:var(--red)}
+#acceso button{height:54px;border:0;border-radius:11px;background:var(--red);color:#fff;cursor:pointer;
+  font-family:"BSD","Arial Narrow",Impact,sans-serif;font-weight:700;font-size:22px;letter-spacing:.06em;transition:filter .15s,transform .05s}
+#acceso button:hover{filter:brightness(1.08)}
+#acceso button:active{transform:translateY(1px)}
+#acceso button:disabled{opacity:.6;cursor:wait}
+#acceso .err:empty{display:none}
+#acceso .err{margin:0;font-size:14px;color:#FF8A90}
+#acceso .nota{margin:0;font-size:13px;color:#7E818A;line-height:1.5}
+#acceso .pie{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-top:18px;border-top:1px solid var(--line);font-size:12px;color:#7E818A}
+#acceso .pie b{font-family:"BSD","Arial Narrow",Impact,sans-serif;font-weight:700;font-size:16px;letter-spacing:.04em;color:var(--ink)}
+#acceso.abriendo form{opacity:.55;pointer-events:none}
+@keyframes ntxEntra{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+#acceso .caja>*{animation:ntxEntra .5s ease both}
+#acceso .caja>*:nth-child(2){animation-delay:.06s}#acceso .caja>*:nth-child(3){animation-delay:.12s}#acceso .caja>*:nth-child(4){animation-delay:.18s}
+@media (prefers-reduced-motion:reduce){#acceso .caja>*{animation:none}}
+#acceso .esp{display:grid;gap:10px;padding:16px;border-radius:12px;border:1px solid #5A4A1E;background:rgba(70,56,20,.35);color:#F5E7B8;font-size:14px;line-height:1.5}
+#acceso .esp b{font-size:15px;color:#FFF3CC}
+#acceso .esp[hidden]{display:none}
+#acceso .esp button{height:46px;font-size:18px}
+#ntxMarca{position:fixed;inset:0;pointer-events:none;z-index:2147483000;background-repeat:repeat}
+</style>
+<svg class="lineas" viewBox="0 0 400 800" preserveAspectRatio="xMaxYMin slice" aria-hidden="true">
+  <g fill="none" stroke-linecap="round">
+    <path d="M250 -20 L470 260" stroke="#E3222C" stroke-width="10" opacity=".9"/>
+    <path d="M286 -20 L470 214" stroke="#E3222C" stroke-width="3" opacity=".55"/>
+    <path d="M214 -20 L470 306" stroke="#FFFFFF" stroke-width="1.2" opacity=".14"/>
+    <path d="M-40 640 L170 900" stroke="#FFFFFF" stroke-width="1.2" opacity=".10"/>
+    <path d="M-40 690 L130 900" stroke="#E3222C" stroke-width="3" opacity=".35"/>
+  </g>
+</svg>
+<div class="caja">
+  <img class="logo" src="img/logo.png" alt="NTX Original Parts">
+  <div>
+    <div class="ceja">Equipo de ventas</div>
+    <h1>Catálogo<br><span>NTX</span></h1>
+    <p class="sub">Precios, stock, clientes y pedidos en un solo lugar. Ingresa tu código de vendedor para entrar.</p>
+  </div>
+  <form id="accForm" autocomplete="off" novalidate>
+    <label for="accCod">Código de vendedor</label>
+    <input id="accCod" type="text" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Escribe tu código" aria-describedby="accErr">
+    <button id="accBtn" type="submit">ENTRAR</button>
+    <p class="err" id="accErr" role="alert"></p>
+    <div class="esp" id="accEsp" hidden><b id="accEspT"></b><span id="accEspM"></span><button id="accRe" type="button">REINTENTAR</button></div>
+    <p class="nota">Tu código queda vinculado a este dispositivo; para usarlo en otro, administración debe aprobarlo. ¿No tienes código? Pídelo a administración.</p>
+  </form>
+  <div class="pie"><b>Respaldamos lo que vendemos.</b><span>NTX Original Parts</span></div>
+</div>
+</div>

@@ -1,0 +1,92 @@
+<script>
+/* Portada de acceso: el catálogo va cifrado. Para abrirlo hacen falta el código del vendedor Y una llave que solo entrega
+   el servidor (Apps Script) cuando el dispositivo está aprobado. El primer dispositivo de cada vendedor queda registrado solo;
+   cualquier otro espera la aprobación de administración. Generado por herramientas/portal.py: no editar a mano. */
+(function(){
+  const LLAVES = __LLAVES__, CAT = __CAT__, LSC = "ntx-codigo", LSD = "ntx-disp", SRV = "__SRV__";
+  const $ = id => document.getElementById(id), b = s => Uint8Array.from(atob(s), x => x.charCodeAt(0));
+  const norm = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  function dispId(){
+    let d = ""; try{ d = localStorage.getItem(LSD) || ""; }catch(e){}
+    if(!/^[A-Za-z0-9]{24}$/.test(d)){
+      const a = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789", r = crypto.getRandomValues(new Uint8Array(24));
+      d = Array.from(r, x => a[x % a.length]).join(""); try{ localStorage.setItem(LSD, d); }catch(e){}
+    }
+    return d;
+  }
+  async function etiqueta(){
+    const ua = navigator.userAgent || "";
+    let so = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac OS X/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "Otro";
+    let nav = /EdgA?\//.test(ua) ? "Edge" : /SamsungBrowser/.test(ua) ? "Samsung Internet" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /FxiOS|Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Navegador";
+    let modelo = "";
+    try{ if(navigator.userAgentData && navigator.userAgentData.getHighEntropyValues){ const v = await navigator.userAgentData.getHighEntropyValues(["model"]); modelo = (v.model || "").trim(); } }catch(e){}
+    if(!modelo){ const m = ua.match(/Android [\d.]+; (?:[a-z]{2}-[a-z]{2}; )?([^;)]+?)(?: Build|\))/i); if(m && m[1] !== "K") modelo = m[1].trim(); }
+    const app = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone ? " · ícono" : "";
+    return (so + (modelo ? " " + modelo : "") + " · " + nav + app).slice(0, 110);
+  }
+  function marca(nombre, disp){
+    const t = "NTX · " + nombre + " · " + disp, w = 300, h = 190;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><text x="${w/2}" y="${h/2}" transform="rotate(-24 ${w/2} ${h/2})" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="13" font-weight="600" letter-spacing="1" fill="rgb(96,98,108)" fill-opacity=".22">${t.replace(/[&<>]/g, "")}</text></svg>`;
+    const m = document.createElement("div"); m.id = "ntxMarca"; m.setAttribute("aria-hidden", "true");
+    m.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483000;background-repeat:repeat;background-image:url(\"data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg) + "\")";
+    document.body.appendChild(m);
+    new MutationObserver(() => { if(!document.getElementById("ntxMarca")) document.body.appendChild(m); }).observe(document.body, { childList:true });
+  }
+  async function descifrar(pase, r){
+    const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pase), "PBKDF2", false, ["deriveKey"]);
+    for(const w of LLAVES){
+      let raw;
+      try{
+        const k = await crypto.subtle.deriveKey({ name:"PBKDF2", salt:b(w.s), iterations:150000, hash:"SHA-256" }, km, { name:"AES-GCM", length:256 }, false, ["decrypt"]);
+        raw = await crypto.subtle.decrypt({ name:"AES-GCM", iv:b(w.i) }, k, b(w.d));
+      }catch(e){ continue; }
+      const kc = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+      const p = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name:"AES-GCM", iv:b(CAT.i) }, kc, b(CAT.d))));
+      window.NTX_PASE = pase; window.NTX_CERRADO = true;
+      $("acceso").remove(); document.body.insertAdjacentHTML("beforeend", p.h);
+      marca(r.nombre, r.disp);
+      const s = document.createElement("script"); s.textContent = p.j; document.body.appendChild(s);
+      return true;
+    }
+    return false;
+  }
+  /* devuelve: "ok" | mensaje de error | {t, m} para el aviso de espera */
+  async function abrir(code){
+    const c = norm(code);
+    if(!c) return "Escribe tu código.";
+    let r;
+    try{
+      const q = new URLSearchParams({ a:"entrar", cod:c, d:dispId(), e:await etiqueta() });
+      const res = await fetch(SRV + "?" + q.toString(), { cache:"no-store", redirect:"follow" });
+      r = await res.json();
+    }catch(e){ return "No hay conexión con el servidor. Revisa tu internet e intenta de nuevo."; }
+    try{ localStorage.setItem(LSC, c); }catch(e){}
+    if(r.estado === "ok"){
+      if(await descifrar(c + norm(r.s), r)) return "ok";
+      return "El catálogo se está actualizando. Intenta de nuevo en unos minutos.";
+    }
+    if(r.estado === "pendiente") return { t:"Este dispositivo espera aprobación", m:"Tu código ya se usa en otro dispositivo. Administración recibió el aviso; cuando lo apruebe, toca Reintentar." };
+    if(r.estado === "rechazado") return { t:"Este dispositivo no fue autorizado", m:"Si es tu nuevo teléfono, habla con administración para que lo habilite." };
+    if(r.estado === "bloqueado") return { t:"Acceso suspendido", m:"Tu acceso al catálogo está suspendido por ahora. Habla con administración." };
+    try{ localStorage.removeItem(LSC); }catch(e){}
+    if(r.estado === "codigo") return "Ese código no es válido. Revísalo e intenta de nuevo.";
+    return r.msg || "No se pudo entrar. Intenta de nuevo.";
+  }
+  const f = $("accForm"), inp = $("accCod"), btn = $("accBtn"), err = $("accErr"), box = $("acceso"), esp = $("accEsp");
+  if(!(window.crypto && crypto.subtle && window.fetch)){ err.textContent = "Este navegador no puede abrir el catálogo. Usa Chrome o Safari actualizados."; btn.disabled = true; return; }
+  const ocupado = si => { btn.disabled = si; btn.textContent = si ? "ABRIENDO…" : "ENTRAR"; box.classList.toggle("abriendo", si); $("accRe").disabled = si; };
+  async function intento(code){
+    err.textContent = ""; ocupado(true);
+    let x; try{ x = await abrir(code); }catch(e){ x = "No se pudo entrar. Intenta de nuevo."; }
+    if(x === "ok") return;
+    ocupado(false);
+    if(typeof x === "object"){ esp.hidden = false; $("accEspT").textContent = x.t; $("accEspM").textContent = x.m; inp.value = code; }
+    else { esp.hidden = true; err.textContent = x; inp.select(); }
+  }
+  f.addEventListener("submit", e => { e.preventDefault(); intento(inp.value); });
+  $("accRe").addEventListener("click", () => intento(inp.value));
+  let saved = ""; try{ saved = localStorage.getItem(LSC) || ""; }catch(e){}
+  if(saved) intento(saved);
+})();
+</script>
+</body></html>
