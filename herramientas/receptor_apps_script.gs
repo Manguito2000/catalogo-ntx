@@ -1,7 +1,8 @@
 // Receptor del "Catálogo NTX Vendedores" (portal de ventas NTX). Vive en la cuenta de Google de Mango (script.google.com).
 // Implementar como aplicación web: "Ejecutar como: yo", "Acceso: cualquier persona".
 // Hace tres cosas:
-//  1) Recibe los pedidos de la página (?p=...) y los manda por correo con el asunto "PEDIDO NTX <id>" (Claude los pasa a Holded).
+//  1) Recibe los pedidos de la página (?p=...) y los manda por correo limpio: asunto "PEDIDO NTX · cliente · vendedor · id",
+//     cuerpo legible y la referencia #NTX1. al final (oculta en el HTML) para que Claude los pase a Holded.
 //  2) Portero de dispositivos (?a=entrar): el primer dispositivo de cada vendedor queda registrado; cualquier otro queda
 //     esperando la aprobación de Mango, que recibe un correo con botones para aprobar o rechazar.
 //     Sin aprobación el servidor no entrega la llave del vendedor, y sin esa llave el código solo no abre nada.
@@ -22,7 +23,7 @@ function doGet(e) {
   return recibirPedido(q.p || "");
 }
 
-/* ---------- 1) pedidos (igual que antes) ---------- */
+/* ---------- 1) pedidos ---------- */
 function recibirPedido(p) {
   if (!/^[A-Za-z0-9_-]{20,6000}$/.test(p)) return pagina("No llegó ningún pedido", "Vuelve al catálogo y envíalo de nuevo.");
   var datos, b64 = p;
@@ -34,13 +35,62 @@ function recibirPedido(p) {
   }
   var cache = CacheService.getScriptCache();            // si recargan la pestaña no se duplica el correo
   if (!cache.get(String(datos.id))) {
-    MailApp.sendEmail(destinatarios(), "PEDIDO NTX " + datos.id,
-      "#NTX1." + p + "\n\n" + (datos.x || ("Cliente: " + (datos.cn ? "CLIENTE NUEVO: " + datos.cn : datos.ci) +
-      "\nPiezas: " + datos.l + "\nTarifa: " + datos.tf + " · Descuento: " + datos.d + "%" + (datos.n ? "\nNota: " + datos.n : ""))));
+    var c = correoPedido(datos, p);
+    MailApp.sendEmail({ to: destinatarios(), subject: c.asunto, body: c.texto, htmlBody: c.html, name: "Portal de ventas NTX" });
     cache.put(String(datos.id), "1", 21600);
   }
   return pagina("Pedido recibido", "Ya puedes cerrar esta pestaña y volver al catálogo.");
 }
+// Correo limpio para la gente; la referencia #NTX1. (que lee el procesador automático) va al final del texto y oculta en el HTML.
+function correoPedido(d, p) {
+  var nuevo = !!d.cn, tipo = d.tp === "q" ? "Presupuesto" : "Pedido";
+  var cliente = nuevo ? d.cn : (d.nm || "Cliente sin nombre (" + String(d.ci || "").slice(-6) + ")");
+  var vend = d.vn || vendedorPorFicha(d.k) || "Vendedor no identificado";
+  var tarifa = { usd: "USD", bcv: "BCV", lista: "Lista" }[d.tf] || String(d.tf || "").toUpperCase();
+  var desc = Number(d.d) || 0, cont = d.c == 1;
+  var pr = String(d.pr || "").split(","), sub = 0, conPrecio = !!d.pr;
+  var lineas = String(d.l || "").split(",").filter(String).map(function (x, i) {
+    var j = x.lastIndexOf("*"), cod = j > 0 ? x.slice(0, j) : x, q = j > 0 ? Number(x.slice(j + 1)) || 0 : 0;
+    var u = pr[i] === "" || pr[i] == null ? null : Number(pr[i]);
+    if (u != null) sub += u * q;
+    return { c: cod, q: q, u: u };
+  });
+  var total = d.tt ? Number(d.tt) : Math.round(sub * (100 - desc)) / 100;
+  var piezas = lineas.reduce(function (a, l) { return a + l.q; }, 0);
+  var cuando = d.t ? fecha(d.t) : fecha(new Date().toISOString());
+  var descTxt = desc ? desc + "%" + (cont ? " (contado)" : "") : "Sin descuento";
+  var asunto = "PEDIDO NTX · " + cliente + " · " + vend + (d.tp === "q" ? " · presupuesto" : "");   // siempre empieza con "PEDIDO NTX" (lo busca el procesador)
+
+  var t = tipo + " de " + vend + "\n\nCliente: " + cliente + (nuevo ? " (CLIENTE NUEVO)" : "") + "\nVendedor: " + vend + "\nFecha: " + cuando +
+    "\nTarifa: " + tarifa + " · Descuento: " + descTxt + "\n\n" +
+    lineas.map(function (l) { return l.q + " x " + l.c + (l.u != null ? "   " + din(l.u) + " c/u = " + din(l.u * l.q) : ""); }).join("\n") +
+    "\n\n" + piezas + (piezas === 1 ? " pieza" : " piezas") + (conPrecio ? (desc ? "\nSubtotal: " + din(sub) + "\nDescuento " + desc + "%: -" + din(sub - total) : "") + "\nTOTAL: " + din(total) : "") +
+    (d.n ? "\n\nNota: " + d.n : "") + "\n\n\n\n\n— referencia para el sistema —\n#NTX1." + p;
+
+  var td = 'style="padding:9px 10px;border-bottom:1px solid #eee;', filas = lineas.map(function (l) {
+    return '<tr><td ' + td + 'font-weight:600">' + esc(l.c) + '</td><td ' + td + 'text-align:center">' + l.q + '</td>' +
+      (conPrecio ? '<td ' + td + 'text-align:right;color:#555">' + (l.u != null ? din(l.u) : "") + '</td><td ' + td + 'text-align:right">' + (l.u != null ? din(l.u * l.q) : "") + '</td>' : '') + '</tr>';
+  }).join("");
+  var th = 'style="padding:8px 10px;font-size:12px;color:#777;font-weight:600;border-bottom:2px solid #16161A;text-align:';
+  var dato = function (k, v) { return '<tr><td style="padding:3px 0;color:#777;width:92px">' + k + '</td><td style="padding:3px 0;font-weight:600">' + v + '</td></tr>'; };
+  var h = '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#16161A;font-size:15px;line-height:1.4">' +
+    '<div style="background:#16161A;color:#fff;padding:14px 18px;border-radius:12px 12px 0 0"><span style="background:#E3222C;padding:3px 9px;border-radius:6px;font-size:12px;font-weight:700;letter-spacing:.5px">' + tipo.toUpperCase() + '</span>' +
+    '<span style="float:right;font-size:12px;color:#bbb;padding-top:3px">' + esc(cuando) + '</span>' +
+    '<div style="font-size:21px;font-weight:700;margin-top:10px">' + esc(cliente) + (nuevo ? ' <span style="font-size:12px;background:#fff;color:#E3222C;padding:2px 7px;border-radius:5px;vertical-align:middle">CLIENTE NUEVO</span>' : '') + '</div></div>' +
+    '<div style="border:1px solid #e3e3e3;border-top:0;border-radius:0 0 12px 12px;padding:14px 18px">' +
+    '<table style="border-collapse:collapse;font-size:14px;margin-bottom:14px">' + dato("Vendedor", esc(vend)) + dato("Tarifa", esc(tarifa)) + dato("Descuento", esc(descTxt)) + '</table>' +
+    '<table style="border-collapse:collapse;width:100%;font-size:14px"><tr><th ' + th + 'left">Código</th><th ' + th + 'center">Cant.</th>' +
+    (conPrecio ? '<th ' + th + 'right">Precio</th><th ' + th + 'right">Importe</th>' : '') + '</tr>' + filas + '</table>' +
+    '<table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:8px"><tr><td style="padding:4px 10px;color:#777">' + piezas + (piezas === 1 ? ' pieza' : ' piezas') + '</td>' +
+    (conPrecio ? '<td style="padding:4px 10px;text-align:right">' + (desc ? '<span style="color:#777">Subtotal ' + din(sub) + ' · −' + desc + '% ' + din(sub - total) + '</span><br>' : '') +
+      '<b style="font-size:18px">Total ' + din(total) + '</b></td>' : '') + '</tr></table>' +
+    (d.n ? '<div style="margin-top:14px;background:#FFF6D6;border-radius:8px;padding:10px 12px"><b>Nota:</b> ' + esc(d.n) + '</div>' : '') +
+    '</div><div style="font-size:11px;color:#aaa;text-align:center;margin-top:10px">Portal de ventas NTX · ' + esc(d.id) + '</div>' +
+    '<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#ffffff;opacity:0;mso-hide:all">#NTX1.' + p + '</div></div>';
+  return { asunto: asunto, texto: t, html: h };
+}
+function din(n) { return "$" + (Math.round(Number(n) * 100) / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function vendedorPorFicha(k) { return ""; }   // las fichas k no están en este script; la página ya manda el nombre (vn)
 
 /* ---------- 2) portero ---------- */
 function entrar(q) {
