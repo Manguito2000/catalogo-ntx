@@ -26,7 +26,7 @@
   }
   function marca(nombre, disp){
     const t = "NTX · " + nombre + " · " + disp, w = 300, h = 190;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><text x="${w/2}" y="${h/2}" transform="rotate(-24 ${w/2} ${h/2})" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="13" font-weight="600" letter-spacing="1" fill="rgb(96,98,108)" fill-opacity=".22">${t.replace(/[&<>]/g, "")}</text></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><text x="${w/2}" y="${h/2}" transform="rotate(-24 ${w/2} ${h/2})" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="13" font-weight="600" letter-spacing="1" fill="rgb(96,98,108)" fill-opacity=".12">${t.replace(/[&<>]/g, "")}</text></svg>`;
     const m = document.createElement("div"); m.id = "ntxMarca"; m.setAttribute("aria-hidden", "true");
     m.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483000;background-repeat:repeat;background-image:url(\"data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg) + "\")";
     document.body.appendChild(m);
