@@ -25,12 +25,14 @@ function cbVisible(n){
   });
   pc = r2(pc); return { pc, saldo:Math.max(0, r2(n.real - pc)) };
 }
+/* Holded guarda las fechas como medianoche de España: sumando 2 h y leyendo en UTC sale el día de calendario correcto en cualquier teléfono */
+const cbDia = ts => { const d = new Date((ts + 7200) * 1000); return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); };
 function cbVence(n){
-  if(!n.vence) return null; const h = new Date(); h.setHours(0,0,0,0); const v = new Date(n.vence * 1000); v.setHours(0,0,0,0);
-  return Math.round((v - h) / 864e5);
+  if(!n.vence) return null; const h = new Date(); h.setHours(0,0,0,0);
+  return Math.round((cbDia(n.vence) - h) / 864e5);
 }
 const cbVTxt = d => d == null ? "" : d < 0 ? "Vencida hace " + (-d) + (d === -1 ? " día" : " días") : d === 0 ? "Vence hoy" : "Vence en " + d + (d === 1 ? " día" : " días");
-const cbFecha = s => s ? new Date(s * 1000).toLocaleDateString("es-VE", { day:"2-digit", month:"short" }) : "";
+const cbFecha = s => s ? cbDia(s).toLocaleDateString("es-VE", { day:"2-digit", month:"short" }) : "";
 const cbRows = () => cbNotas().map(n => Object.assign({ n, d:cbVence(n) }, cbVisible(n))).filter(x => x.n.pend >= 0.01 && (x.saldo >= 0.01 || x.pc >= 0.01));
 function cobBadge(){
   const b = $("cobN"); if(!b) return; cbLoad();
@@ -240,4 +242,6 @@ $("vCob").addEventListener("click", async e => {
 $("vCob").addEventListener("input", e => { const k = e.target.dataset && e.target.dataset.cbIn; if(!k) return; CB.f[k] = e.target.value; CB.err = ""; cbSum(); });
 $("btnCob").addEventListener("click", () => go("cobros"));
 window.addEventListener("online", () => { cbLoad(); cbFlush().then(() => { if(VISTA === "cobros") cobRender(); cobBadge(); }); });
+/* cobros guardados sin conexión: se intentan enviar al abrir el portal, sin esperar a que entren a Cobros */
+setTimeout(() => { cbLoad(); if(CB.cola.length) cbFlush().then(cobBadge); }, 5000);
 /*FIN-COBRANZAS*/

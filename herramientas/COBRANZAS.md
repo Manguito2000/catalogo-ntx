@@ -9,7 +9,7 @@ El receptor devuelve en cada cobro `pg` (ids de los pagos de Holded con que se c
 `[id, número, idCliente, fecha, vence, total, pagado, pendiente, tarifa, desc%, saldoReal, saldoBs, [[idPago, monto, fecha]]]`
 - `tarifa`: `u` USD, `l` Lista, `b` BCV, `?` sin determinar (mostrar solo saldoReal).
 - `saldoReal`: lo que falta en dólares reales. `saldoBs` (solo BCV): lo que falta si paga en Bs a tasa BCV (= saldoReal / 0,85).
-- Vencida si `vence` < hoy (fechas en segundos). Se refresca 12:40 pm y 6:40 pm, lunes a sábado.
+- Vencida si el día de `vence` < hoy. Ojo: Holded da las fechas en segundos como medianoche de España; para el día de calendario se suma 2 h y se lee en UTC (`cbDia` en cobranzas_pagina.js). Se refresca 12:40 pm y 6:40 pm, lunes a sábado.
 
 ## Reglas de negocio (confirmadas por Mango)
 - Nota BCV pagada en bolívares: el cliente paga $100 y se abonan $85 (x 0,85). En divisas (efectivo, Zelle, USDT) abona 1:1 contra saldoReal.

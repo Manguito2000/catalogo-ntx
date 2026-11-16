@@ -6,8 +6,9 @@ import json, os, re, sys
 AQUI = os.path.dirname(os.path.abspath(__file__)); lee = lambda n: open(os.path.join(AQUI, n), encoding='utf-8').read()
 p = sys.argv[1]; P = json.load(open(p, encoding='utf-8')); h, j = P['h'], P['j']
 def una(s, a, b, que):
-    assert s.count(a) == 1 or (s.count(a) == 0 and b in s), 'no encontré (o ya aplicado): ' + que
-    return s.replace(a, b) if a in s else s
+    while b in s: s = s.replace(b, a)          # deshace lo ya aplicado (incluso si quedó repetido) para que el script sea repetible
+    assert s.count(a) == 1, 'no encontré: ' + que
+    return s.replace(a, b)
 def bloque(s, ini, fin, nuevo):
     i = s.find(ini)
     if i < 0: return None
