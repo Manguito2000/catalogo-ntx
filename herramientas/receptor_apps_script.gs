@@ -20,6 +20,7 @@ function doGet(e) {
   if (q.a === "entrar") return json(entrar(q));
   if (q.a === "revisar") return paginaRevisar(q.r || "");
   if (q.a === "admin") return paginaAdmin(q.k || "");
+  if (q.a === "cobro" || q.a === "cobros" || q.a === "anular") return json(cobranzas(q));   // cobranzas: ver cobranzas_apps_script.gs
   return recibirPedido(q.p || "");
 }
 
