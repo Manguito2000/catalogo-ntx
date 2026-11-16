@@ -28,4 +28,23 @@
 .cbe{color:var(--red);font-weight:700;font-size:13px;min-height:0}
 .cbe:empty{display:none}
 .msg .txt{margin-left:6px}
+.cba{display:grid;gap:4px;padding-block:10px;border-bottom:1px solid var(--line)}
+.cba:last-child{border-bottom:0;padding-bottom:0}
+.cba .h{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.cba .h b{font-size:24px;line-height:1}
+.cba .i{font-size:13px;color:var(--mut);font-weight:600;overflow-wrap:anywhere}
+.cba .f{display:flex;gap:18px;flex-wrap:wrap;margin-top:2px}
+.cbimg{width:100%;border-radius:10px;border:1px solid var(--line);background:#fff;min-height:140px;display:block}
+a.send{display:block;text-align:center;text-decoration:none}
+.sel small{white-space:nowrap}
+/* barra inferior del portal: los dos ambientes */
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:8;background:var(--band);display:grid;grid-template-columns:1fr 1fr;padding-bottom:env(safe-area-inset-bottom,0px);border-top:1px solid #34363C}
+.nav[hidden]{display:none}
+.nav button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:56px;padding:7px 6px 6px;color:#8E9198;font-weight:800;font-size:11px;letter-spacing:.12em}
+.nav button[aria-current="page"]{color:#fff}
+.nav button[aria-current="page"]::before{content:"";position:absolute;top:-1px;left:18%;right:18%;height:3px;background:var(--red);border-radius:0 0 3px 3px}
+.nav .bdg{position:absolute;top:5px;left:calc(50% + 9px);margin:0}
+body.con-nav .bar{bottom:calc(56px + env(safe-area-inset-bottom,0px));padding-bottom:0}
+body.con-nav .grid{padding-bottom:180px}
+body.con-nav .pg{padding-bottom:110px}
 /*FIN-COBRANZAS*/
