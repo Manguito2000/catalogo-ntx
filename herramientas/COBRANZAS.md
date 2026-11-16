@@ -1,6 +1,8 @@
 # Cobranzas del portal de ventas NTX — estado y contrato (nov 2026)
 
-Hecho y probado (fases 1 a 3): datos, conciliación y receptor. Falta solo la parte visual en `index.html` (pestaña Cobranzas, formulario, "Por entregar", recibo).
+Hecho y probado: datos, conciliación, receptor y la pestaña «Cobros» del portal (lista de pendientes, registrar cobro, por entregar, recibo en imagen, cola sin conexión).
+La pestaña vive en `cobranzas_pagina.js/.css`; `aplicar_cobranzas.py plano.json` la inyecta en el catálogo (flujo: `portal.py abrir` → `aplicar_cobranzas.py` → `portal.py armar`). Es repetible.
+El receptor devuelve en cada cobro `pg` (ids de los pagos de Holded con que se confirmó): la página lo usa para que el saldo no rebote entre la confirmación y el siguiente refresco de datos.json.
 
 ## Datos que ya recibe la página (datos.json, dentro del bloque cifrado de cada vendedor)
 `nt` = notas de sus clientes, pendientes y saldadas en los últimos 21 días. Cada una:
