@@ -19,7 +19,7 @@ def todo(ruta):
         out += d; p += 1
         if ruta == 'contacts' and len(d) < 500: break
     return out
-prods, conts = todo('products'), todo('contacts')
+prods, conts, notas = todo('products'), todo('contacts'), todo('documents/invoice')
 precios = {}
 for x in prods:
     sku = (x.get('sku') or '').strip()
@@ -29,12 +29,42 @@ for x in prods:
 cl = sorted(([x['id'], ' '.join((x.get('name') or '').split()), ((x.get('tags') or [''])[0] or ''), x.get('tradeName') or ''] for x in conts
              if x.get('type') == 'client' and (x.get('name') or '').strip() and x['id'] != NUEVO['id']), key=lambda r: r[1].upper())
 assert len(precios) > 50 and len(cl) > 50, 'Holded devolvió muy pocos datos; no se toca datos.json'
+# --- Cobranzas: notas pendientes (y saldadas hace poco) por cliente. Solo lectura de Holded.
+# Cada nota: [id, número, idCliente, fecha, vence, total, pagado, pendiente, tarifa, desc%, saldoReal, saldoBs, [[idPago, monto, fecha]]]
+#   tarifa: 'u' USD, 'l' Lista, 'b' BCV, '?' no se pudo determinar (se deduce comparando los precios de la nota con las tarifas actuales).
+#   saldoReal = lo que falta en dólares reales (lo que cuenta Holded una vez puesto el 15 %). En una nota BCV sin el 15 % todavía: pendiente x 0,85.
+#   saldoBs   = solo notas BCV: lo que falta si se paga en bolívares a tasa BCV (saldoReal / 0,85). En las demás va null.
+#   Los pagos (id de Holded) permiten a la página confirmar los cobros anotados por el vendedor sin depender del saldo.
+tar = {}
+for x in prods:
+    sku = (x.get('sku') or '').strip(); r = {y['id']: y.get('subtotal') for y in (x.get('rates') or [])}
+    if sku: tar[sku] = (float(x.get('price') or 0), float(r.get(LIS) or 0), float(r.get(BCV) or 0))
+def tarifa(n):
+    v = dict(u=0, l=0, b=0); m = 0
+    for l in n.get('products') or []:
+        t, pr = tar.get((l.get('sku') or '').strip()), float(l.get('price') or 0)
+        if not t or pr <= 0: continue
+        m += 1; c = min(((abs(pr - ref) / ref, q) for ref, q in zip(t, 'ulb') if ref > 0), default=(9, ''))
+        if c[0] <= 0.02: v[c[1]] += 1
+    q = max(v, key=v.get)
+    return q if m and v[q] * 2 > m else '?'
+tagcl = {x['id']: ((x.get('tags') or [''])[0] or '') for x in conts}
+corte = datetime.datetime.now().timestamp() - 21 * 86400; nt = {}
+for n in notas:
+    if n.get('draft') or not n.get('docNumber'): continue
+    pen, pag = round(float(n.get('paymentsPending') or 0), 2), [[y.get('id'), round(float(y.get('amount') or 0), 2), y.get('date')] for y in (n.get('paymentsDetail') or [])]
+    if pen < 0.01 and not (pag and max(y[2] or 0 for y in pag) >= corte): continue
+    t, d = tarifa(n), float(n.get('discount') or 0)
+    real = round(pen * 0.85, 2) if t == 'b' and d == 0 else pen
+    nt.setdefault(tagcl.get(n.get('contact'), ''), []).append([n['id'], n['docNumber'], n.get('contact'), n.get('date'), n.get('dueDate') or None,
+        round(float(n.get('total') or 0), 2), round(float(n.get('paymentsTotal') or 0), 2), pen, t, d, real, round(real / 0.85, 2) if t == 'b' else None, pag])
+assert len(notas) > 100, 'Holded devolvió muy pocas notas; no se toca datos.json'
 ahora = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'); b64 = lambda b: base64.b64encode(b).decode(); blobs = []
 for v in json.load(open(a.vendedores, encoding='utf-8'))['v']:
     cod = re.sub(r'[^A-Z0-9]', '', (v['codigo'] + v['s']).upper()); salt, iv = os.urandom(16), os.urandom(12)
     key = hashlib.pbkdf2_hmac('sha256', cod.encode(), salt, 150000, 32)
-    data = dict(v=dict(k=v['k'], nombre=v['nombre'], tag=v['tag']), fecha=ahora, p=precios, nuevo=NUEVO, cl=[r for r in cl if r[2] == v['tag']])
+    data = dict(v=dict(k=v['k'], nombre=v['nombre'], tag=v['tag']), fecha=ahora, p=precios, nuevo=NUEVO, cl=[r for r in cl if r[2] == v['tag']], nt=sorted(nt.get(v['tag'], []), key=lambda r: r[3] or 0))
     blobs.append(dict(s=b64(salt), i=b64(iv), d=b64(AESGCM(key).encrypt(iv, json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode(), None))))
-    print(v['tag'], len(data['cl']), 'clientes')
+    print(v['tag'], len(data['cl']), 'clientes ·', sum(1 for r in data['nt'] if r[7] >= 0.01), 'notas pendientes')
 json.dump(dict(fecha=ahora, v=blobs), open(a.salida, 'w', encoding='utf-8'), separators=(',', ':'))
 print(len(precios), 'códigos con precio ·', ahora)
