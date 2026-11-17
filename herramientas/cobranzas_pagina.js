@@ -325,15 +325,26 @@ setTimeout(() => { cbLoad(); if(CB.cola.length) cbFlush().then(cobBadge); }, 500
   if(window.visualViewport) window.visualViewport.addEventListener("resize", () => setTimeout(recoloca, 60)); }
 /* "Puesta de sol": en el catálogo, al deslizar hacia abajo la banda de arriba y la barra de abajo se retiran poco a poco hacia sus bordes
    (acompañan al dedo, no saltan); al deslizar hacia arriba regresan igual de suave, un poco más rápido. La barra roja del pedido baja al borde y sigue visible. */
-const SOL = { f:0, y:0, t:false };
-function solPinta(){ const st = document.body.style; st.setProperty("--sol", SOL.f.toFixed(3)); st.setProperty("--solb", Math.round(SOL.f * ($("nav").offsetHeight || 0)) + "px"); }
-function solCero(){ SOL.f = 0; SOL.y = Math.max(0, window.scrollY); solPinta(); }
-window.addEventListener("scroll", () => { if(SOL.t) return; SOL.t = true; requestAnimationFrame(() => { SOL.t = false;
+const SOL = { f:0, v:0, y:0, t:false, a:false };
+/* f = destino que marca el scroll; v = lo que se ve. v persigue a f un poco en cada cuadro de pantalla (unos 60 por segundo),
+   así el movimiento es una pendiente continua aunque el teléfono avise del scroll a saltos. Se mueve cada barra directamente (sin recalcular toda la página). */
+function solPinta(){
+  const h = document.querySelector("header.top"), n = $("nav"), b = $("bar"), v = SOL.v, nh = n.offsetHeight || 0;
+  h.style.transform = v ? "translate3d(0," + (-v * h.offsetHeight).toFixed(2) + "px,0)" : ""; h.style.opacity = v ? (1 - v * .35).toFixed(3) : "";
+  n.style.transform = v ? "translate3d(0," + (v * nh).toFixed(2) + "px,0)" : ""; b.style.transform = v && !n.hidden ? "translate3d(0," + (v * nh).toFixed(2) + "px,0)" : "";
+}
+function solAnda(){
+  if(SOL.a) return; SOL.a = true;
+  const paso = () => { const d = SOL.f - SOL.v; if(Math.abs(d) < 0.002){ SOL.v = SOL.f; solPinta(); SOL.a = false; return; } SOL.v += d * 0.16; solPinta(); requestAnimationFrame(paso); };
+  requestAnimationFrame(paso);
+}
+function solCero(){ SOL.f = 0; SOL.y = Math.max(0, window.scrollY); solAnda(); }
+window.addEventListener("scroll", () => {
   const y = Math.max(0, window.scrollY), max = document.documentElement.scrollHeight - window.innerHeight; let d = y - SOL.y; SOL.y = y;
-  if((VISTA || "catalogo") !== "catalogo" || document.body.classList.contains("tecl") || y < 12){ if(SOL.f){ SOL.f = 0; solPinta(); } return; }
+  if((VISTA || "catalogo") !== "catalogo" || document.body.classList.contains("tecl") || y < 12){ if(SOL.f){ SOL.f = 0; solAnda(); } return; }
   if(y > max - 2 || !d) return;                       // rebote del final de la página en iPhone
   d = Math.max(-90, Math.min(90, d));                 // un salto programado no las esconde de golpe
   const f = Math.max(0, Math.min(1, SOL.f + (d > 0 ? d / 420 : d / 200)));
-  if(f !== SOL.f){ SOL.f = f; solPinta(); } }); }, { passive:true });
+  if(f !== SOL.f){ SOL.f = f; solAnda(); } }, { passive:true });
 document.addEventListener("focusin", solCero);
 /*FIN-COBRANZAS*/

@@ -48,8 +48,6 @@ body.con-nav .bar{bottom:calc(56px + env(safe-area-inset-bottom,0px));padding-bo
 body.con-nav .grid{padding-bottom:180px}
 body.con-nav .pg{padding-bottom:110px}
 body.tecl .nav{display:none}
-/* puesta de sol: las barras se retiran hacia sus bordes siguiendo el scroll */
-header.top{transform:translateY(calc(var(--sol,0) * -100%));opacity:calc(1 - var(--sol,0) * .35);will-change:transform}
-.nav{transform:translateY(calc(var(--sol,0) * 100%));will-change:transform}
-body.con-nav .bar{transform:translateY(var(--solb,0px));will-change:transform}
+/* puesta de sol: el movimiento lo pone el script directamente sobre cada barra */
+header.top,.nav,.bar{will-change:transform}
 /*FIN-COBRANZAS*/
