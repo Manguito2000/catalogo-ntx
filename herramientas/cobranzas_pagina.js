@@ -97,7 +97,7 @@ function cbEntHtml(){
   let h = `<div class="box"><span class="lbl">Efectivo que debes entregar</span><b class="bs num" style="font-size:38px;line-height:1">${money(T("ef"))}</b>
     <small class="hint">USDT ${money(T("us"))} · Zelle ${money(T("ze"))} · Bolívares ${money(T("bs"))} (en $) · ${pend.length} ${pend.length === 1 ? "cobro" : "cobros"} por confirmar</small></div>`;
   const card = c => `<article class="od"><div class="h"><b>${esc(c.cn || "Cliente")}</b>${cbSt(c)}</div>
-      <div class="i num">${esc(c.rec || "Sin número aún")} · Nota ${esc(c.nn || "")} · ${esc(cbHora(c.t))}</div><div class="i num">${esc(cbMetodos(c))}${c.ta ? " · tasa " + c.ta : ""}${c.rf ? " · ref. " + esc(c.rf) : ""}</div>
+      <div class="i num">${esc(c.rec || "Sin número")} · Nota ${esc(c.nn || "")} · ${esc(cbHora(c.t))}</div><div class="i num">${esc(cbMetodos(c))}${c.ta ? " · tasa " + c.ta : ""}${c.rf ? " · ref. " + esc(c.rf) : ""}</div>
       ${c.est === "revisar" && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
       <div class="f"><span class="pr bs num">${money(c.nom)}</span>${cbAcc(c)}</div></article>`;
   h += pend.length ? pend.map(card).join("") : `<div class="box"><p class="hint">No tienes cobros por entregar. Cuando cobres, anótalo desde la pestaña Pendientes.</p></div>`;
@@ -119,7 +119,7 @@ function cbFormHtml(){
     <div class="box"><div class="sel"><span><b>${esc(cbCliente(x.n.cid))}</b><small>${esc(x.n.num)}${bcv ? " · BCV" : ""} · ${esc(cbVTxt(cbVence(x.n)) || "sin vencimiento")}</small></span><span style="flex:none;text-align:right"><small>Falta por cobrar</small><b class="bs num" style="font-size:26px">${money(x.saldo)}</b></span></div>
       ${x.pc >= 0.01 ? `<p class="hint num">En Holded faltan ${money(x.n.real)} · ya anotaste ${money(x.pc)} por confirmar</p>` : ""}</div>`;
   if(mios.length && !ed) h += `<div class="box"><span class="lbl">Abonos que anotaste</span>` + mios.map(c => `<div class="cba"><div class="h"><b class="bs num">${money(c.nom)}</b>${cbSt(c)}</div>
-      <div class="i num">${esc(c.rec || "Sin número aún")} · ${esc(cbHora(c.t))} · ${esc(cbMetodos(c))}${c.ab !== c.nom ? " · abona " + money(c.ab) : ""}</div>${c.est === "revisar" && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
+      <div class="i num">${esc(c.rec || "Sin número")} · ${esc(cbHora(c.t))} · ${esc(cbMetodos(c))}${c.ab !== c.nom ? " · abona " + money(c.ab) : ""}</div>${c.est === "revisar" && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
       <div class="f">${cbAcc(c)}</div></div>`).join("") + `</div>`;
   if(x.saldo < 0.01 && !ed) return h + `<div class="box"><p class="hint">Esta nota ya está cobrada por completo. Sale de tu lista cuando administración registre el pago en Holded. Si te equivocaste en un monto, toca «Corregir» en el abono.</p></div>`;
   return h + `<div class="box"><span class="lbl">${ed ? "Montos corregidos" : mios.length ? "Registrar otro cobro" : "Registrar cobro"}</span>
@@ -145,7 +145,8 @@ function cbSum(){
 }
 function cbOkHtml(){
   const c = CB.ok.cobro, n = cbNotas().find(x => x.id === c.n), sc = n ? cbVisible(n).saldo : 0;
-  return `<div class="okb"><b>${c.rec ? "Cobro " + esc(c.rec) + " guardado" : "Cobro guardado en este teléfono"}</b>${esc(c.cn || "")} · Nota ${esc(c.nn || "")}\n${money(c.nom)} cobrados${n ? " · quedan " + money(sc) + " por cobrar de la nota" : ""}${c.est === "cola" ? "\n" + (navigator.onLine === false ? "Sin conexión" : "El servidor de cobranzas no respondió") + ": se enviará solo en cuanto se pueda. El número de recibo y el recibo para el cliente llegan entonces." : ""}</div>
+  return `<div class="okb"><b>Cobro ${esc(c.rec || "")} guardado</b>${esc(c.cn || "")} · Nota ${esc(c.nn || "")}\n${money(c.nom)} cobrados${n ? " · quedan " + money(sc) + " por cobrar de la nota" : ""}</div>
+    ${c.est === "cola" ? `<div class="msg">Ya puedes enviar el recibo. El cobro quedó guardado en este teléfono y se avisará a administración solo, en cuanto ${navigator.onLine === false ? "vuelva la conexión" : "responda el servidor de cobranzas"}.${CB.diag ? `<br><small style="font-weight:500">Detalle para soporte: ${esc(CB.diag)}</small>` : ""}</div>` : ""}
     ${c.rec ? cbRecHtml(c) : ""}<button class="ghost" data-cb="listo">Listo</button>`;
 }
 /* ¿este teléfono puede mandar la imagen directo a otra aplicación? En computadora no: ahí se manda el texto y la imagen se descarga. */
@@ -170,16 +171,27 @@ function cbRecPinta(c){
 async function cbSrv(a, ex){
   let cod = "", d = ""; try{ cod = localStorage.getItem(LSC) || ""; d = localStorage.getItem("ntx-disp") || ""; }catch(e){}
   const q = new URLSearchParams(Object.assign({ a, cod, d }, ex || {}));
-  const r = await fetch(SCRIPT_URL + "?" + q.toString(), { cache:"no-store", redirect:"follow" });
-  return await r.json();
+  let res; try{ res = await fetch(SCRIPT_URL + "?" + q.toString(), { cache:"no-store", redirect:"follow" }); }catch(e){ CB.diag = "sin respuesta (" + ((e && e.message) || e) + ")"; throw e; }
+  const t = await res.text();
+  try{ const j = JSON.parse(t); CB.diag = ""; return j; }catch(e){ CB.diag = "respuesta inesperada " + res.status + ": " + t.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160); throw e; }
 }
+/* El número de recibo lo pone el teléfono, para poder entregar el recibo en el momento aunque no haya conexión.
+   Sigue la cuenta de lo último que conoce (lo guardado aquí y lo que devolvió el receptor). Si el receptor ya tenía ese número, asigna otro y se avisa. */
+const LSN = "ntx-cobros-n";
+function cbSigRec(){
+  let n = 0, pre = ""; try{ n = Number(localStorage.getItem(LSN)) || 0; }catch(e){}
+  cbCobros().forEach(c => { const m = /^([A-Z]+)-(\d+)$/.exec(c.rec || ""); if(m){ pre = pre || m[1]; n = Math.max(n, Number(m[2])); } });
+  n += 1; try{ localStorage.setItem(LSN, String(n)); }catch(e){}
+  return (pre || ((S.yo && S.yo.tag) || "x").charAt(0).toUpperCase()) + "-" + ("000" + n).slice(-4);
+}
+function cbCambioRec(o, c){ if(o.rec && c.rec && o.rec !== c.rec) CB.avisos.push("El recibo " + o.rec + " de " + (c.cn || "un cliente") + " quedó registrado con el número " + c.rec + ". Si ya se lo enviaste al cliente, envíale el nuevo."); }
 const cbB64 = o => { const b = new TextEncoder().encode(JSON.stringify(o)); let s = ""; b.forEach(x => s += String.fromCharCode(x)); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
 const cbUid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
 function cbMerge(c){ CB.cobros = [c].concat((CB.cobros || []).filter(x => x.id !== c.id)); cbSave(); }
 /* devuelve {ok, cobro} | {err} (el servidor lo rechazó) | {net:true} (sin conexión) */
 async function cbEnviar(o){
   let r;
-  try{ r = await cbSrv("cobro", { c:cbB64({ id:o.id, n:o.n, ef:o.ef, us:o.us, ze:o.ze, bs:o.bs, ab:o.ab, ta:o.ta || 0, rf:o.rf || "", cn:o.cn }) }); }catch(e){ return { net:true }; }
+  try{ r = await cbSrv("cobro", { c:cbB64({ id:o.id, rec:o.rec || "", n:o.n, ef:o.ef, us:o.us, ze:o.ze, bs:o.bs, ab:o.ab, ta:o.ta || 0, rf:o.rf || "", cn:o.cn }) }); }catch(e){ return { net:true }; }
   if(r && r.estado === "ok" && r.cobro) return { ok:true, cobro:r.cobro };
   if(r && r.estado === "no") return { err:"Este dispositivo ya no está autorizado. Habla con administración." };
   return { err:(r && r.msg) || "No se pudo guardar el cobro." };
@@ -189,7 +201,7 @@ async function cbFlush(){
   for(const o of CB.cola.slice()){
     const r = await cbEnviar(o); if(r.net) break;
     CB.cola = CB.cola.filter(x => x.id !== o.id);
-    if(r.ok) cbMerge(r.cobro); else CB.avisos.push("El cobro de " + (o.cn || "un cliente") + " (" + money(o.nom) + ") no se pudo registrar: " + r.err);
+    if(r.ok){ cbCambioRec(o, r.cobro); cbMerge(r.cobro); } else CB.avisos.push("El cobro de " + (o.cn || "un cliente") + " (" + money(o.nom) + ") no se pudo registrar: " + r.err);
   }
   cbSave(); CB.flushing = false;
 }
@@ -221,11 +233,11 @@ async function cbGuardar(){
     }
     CB.edit = null;
   }
-  const o = { id:cbUid(), n:x.n.id, nn:x.n.num, cn:cbCliente(x.n.cid), t:Math.floor(Date.now() / 1000), nom:c.nom, ab:c.ab, ef:c.ef, us:c.us, ze:c.ze, bs:c.bs, ta:c.bs > 0 && x.n.tar !== "b" ? cbNum(CB.f.ta) : 0, rf:(CB.f.rf || "").trim().slice(0, 120), est:"cola" };
+  const o = { id:cbUid(), n:x.n.id, nn:x.n.num, cn:cbCliente(x.n.cid), t:Math.floor(Date.now() / 1000), nom:c.nom, ab:c.ab, ef:c.ef, us:c.us, ze:c.ze, bs:c.bs, ta:c.bs > 0 && x.n.tar !== "b" ? cbNum(CB.f.ta) : 0, rf:(CB.f.rf || "").trim().slice(0, 120), est:"cola", rec:cbSigRec() };
   const r = await cbEnviar(o); CB.busy = false;
   if(r.err){ CB.err = r.err; cobRender(); return; }
   let cobro;
-  if(r.ok){ cobro = r.cobro; cbMerge(cobro); } else { cobro = o; CB.cola.push(o); cbSave(); }
+  if(r.ok){ cobro = r.cobro; cbCambioRec(o, cobro); cbMerge(cobro); } else { cobro = o; CB.cola.push(o); cbSave(); }
   CB.f = cbF0(); CB.nota = null; CB.ok = { cobro }; cobRender(); cobBadge(); window.scrollTo(0, 0);
 }
 

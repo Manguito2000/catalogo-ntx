@@ -52,7 +52,11 @@ function cobroNuevo(tag, q) {
       .reduce(function (s, f) { return s + f.abono; }, 0);
     if (ab > pend - mios + 0.5) return { estado: "error", msg: "El abono ($" + ab.toFixed(2) + ") es mayor que lo que falta de la nota ($" + Math.max(0, pend - mios).toFixed(2) + ")" };
     var props = PropertiesService.getScriptProperties(), n = Number(props.getProperty("COB_N_" + tag) || 0) + 1, ahora = new Date();
-    var rec = (VENDEDORES[tag].pre || tag.charAt(0).toUpperCase()) + "-" + ("000" + n).slice(-4);
+    var pre = VENDEDORES[tag].pre || tag.charAt(0).toUpperCase(), rec = pre + "-" + ("000" + n).slice(-4);
+    // El teléfono propone el número (así entrega el recibo en el momento, incluso sin conexión). Se respeta si es de este vendedor y nadie lo usó.
+    var prop = /^([A-Z]+)-(\d{4,6})$/.exec(String(c.rec || ""));
+    if (prop && prop[1] === pre && !filas.some(function (f) { return f.tag === tag && f.recibo === c.rec; })) { rec = String(c.rec); n = Math.max(n - 1, Number(prop[2])); }
+    else while (filas.some(function (f) { return f.tag === tag && f.recibo === rec; })) { n++; rec = pre + "-" + ("000" + n).slice(-4); }
     var base = (nota.paymentsDetail || []).map(function (p) { return p.id; });
     var fila = []; COB_COLS.forEach(function () { fila.push(""); });
     var pon = function (k, v) { fila[COB[k]] = v; };
