@@ -6,7 +6,11 @@ PBKDF2(código + llave del servidor). La llave del servidor solo la entrega el A
   Abrir para editar:  python3 herramientas/portal.py abrir --vendedores V.json --tag rm --salida plano.json
   Armar:              python3 herramientas/portal.py armar --plano plano.json --vendedores V.json --datos datos.json --salida index.html
 V.json = {"v": [{"tag","nombre","codigo","k","s"}], "srv": "<url /exec del Apps Script>"}  (NO va en este repositorio).
-plano.json = {"h": html del catálogo, "j": js del catálogo}  (NO va en este repositorio)."""
+plano.json = {"h": html del catálogo, "j": js del catálogo}  (NO va en este repositorio).
+No hace falta guardar plano.json en ningún lado: siempre se recupera del index.html publicado con "abrir" (cualquier vendedor
+de V.json sirve). V.json sale del documento datos/vendedores_ext del artefacto "Pedidos NTX".
+Para agregar un vendedor: añadirlo a vendedores_ext, abrir -> refrescar_datos.py -> armar, y que Mango pegue la nueva línea
+VENDEDORES (nombre, h = sha256 del código sin guiones, s) en el receptor de Apps Script y publique una nueva versión."""
 import argparse, base64, hashlib, json, os, re, secrets, sys
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 AQUI = os.path.dirname(os.path.abspath(__file__))
