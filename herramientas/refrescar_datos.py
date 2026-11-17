@@ -2,7 +2,7 @@
 """Refresca datos.json del Catálogo NTX de vendedores: precios, stock y clientes de Holded, cifrados con el código de cada vendedor
 más su llave del servidor (la que el Apps Script solo entrega a dispositivos aprobados).
 Uso:  python3 herramientas/refrescar_datos.py --vendedores vendedores.json --salida datos.json [--clave-archivo "clave V1.txt"]
-  vendedores.json = {"v": [{"tag", "nombre", "codigo", "k", "s"}]}  (está en la base del artefacto "Pedidos NTX": datos/vendedores_ext; NO se guarda en este repositorio)
+  vendedores.json = {"v": [{"tag", "nombre", "codigo", "k", "s"}], "admin": "<llave del panel; opcional>"}  (está en la base del artefacto "Pedidos NTX": datos/vendedores_ext; NO se guarda en este repositorio)
   Sin --clave-archivo se llama a Holded sin cabecera de clave (sirve cuando el entorno la inyecta)."""
 import argparse, base64, datetime, hashlib, json, os, re, urllib.request
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -73,10 +73,13 @@ for n in notas:
         round(float(n.get('total') or 0), 2), round(float(n.get('paymentsTotal') or 0), 2), pen, t, d, real, bcv, pag, factura(n.get('tags'))])
 assert len(notas) > 100, 'Holded devolvió muy pocas notas; no se toca datos.json'
 ahora = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'); b64 = lambda b: base64.b64encode(b).decode(); blobs = []
-for v in json.load(open(a.vendedores, encoding='utf-8'))['v']:
+VJ = json.load(open(a.vendedores, encoding='utf-8'))
+ADM = VJ.get('admin') or os.environ.get('NTX_ADMIN') or ''   # llave de administración (receptor): solo entra, cifrada, en los datos del vendedor 'rm' (Mango)
+for v in VJ['v']:
     cod = re.sub(r'[^A-Z0-9]', '', (v['codigo'] + v['s']).upper()); salt, iv = os.urandom(16), os.urandom(12)
     key = hashlib.pbkdf2_hmac('sha256', cod.encode(), salt, 150000, 32)
     data = dict(v=dict(k=v['k'], nombre=v['nombre'], tag=v['tag']), fecha=ahora, p=precios, nuevo=NUEVO, cl=[r for r in cl if r[2] == v['tag']], nt=sorted(nt.get(v['tag'], []), key=lambda r: r[3] or 0))
+    if v['tag'] == 'rm' and ADM: data['adm'] = ADM
     blobs.append(dict(s=b64(salt), i=b64(iv), d=b64(AESGCM(key).encrypt(iv, json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode(), None))))
     print(v['tag'], len(data['cl']), 'clientes ·', sum(1 for r in data['nt'] if r[7] >= 0.01), 'notas pendientes')
 json.dump(dict(fecha=ahora, v=blobs), open(a.salida, 'w', encoding='utf-8'), separators=(',', ':'))

@@ -51,3 +51,9 @@ El receptor devuelve en cada cobro `pg` (ids de los pagos de Holded con que se c
   Las solicitudes pasan solas a "emitida" en la conciliación de cada hora cuando la nota ya tiene la etiqueta fac. No se envía ningún correo.
 - Hojas nuevas en "Cobranzas NTX": "Solicitudes factura" y "Retenciones". En "Cobros", columna nueva "Factura".
 - En el receptor, doGet enruta con `if (esCobranzas(q.a)) return json(cobranzas(q));`.
+
+## Facturas AdriMan — parte 2: pantallas del portal (nov 2026)
+- Vendedor: en cada nota, botón «Pedir factura legal» (con comentario ≤600 car.) → `a=solfac`; cuando la nota trae factura (`nt[13]`) se ve «Factura AdriMan ######», IVA (solo ver, `config.json` → `iva`, 16 %), chips de retención (No retiene / 75 % / 100 %) y comprobante (subir aquí / WhatsApp / físico). La subida va por POST (text/plain JSON) al receptor → carpeta Drive «Retenciones NTX». El monto a cobrar es el NETO; el IVA que paga el cliente = IVA − retención.
+- Admin: pestaña ADMIN del portal, visible solo con el código de Mango (tag `rm`). La llave `adm` viaja únicamente dentro de los datos cifrados de rm (`refrescar_datos.py` la toma del campo `admin` de vendedores_ext o de la variable `NTX_ADMIN`; nunca va al repo). Pestañas Facturas / Retenciones, «Copiar para Claude», Descartar/Reabrir, Marcar recibido. Sondeo cada 180 s; insignia roja con pendientes.
+- Build: `aplicar_cobranzas.py` es idempotente (fase 1 cobranzas + fase 2 ADMIN).
+- Pendiente de verificar en vivo: subida real a Drive y doPost (desde el sandbox script.google.com está bloqueado; solo se probó con receptor falso).

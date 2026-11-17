@@ -1,4 +1,5 @@
 {
   "descuento_bcv": 15,
-  "_nota": "Descuento (%) que se aplica a las notas BCV: es lo que separa los dólares a tasa BCV de los dólares reales, y el descuento normal por pago en divisas de una nota BCV. Si cambia la brecha, se cambia SOLO este número: lo leen el portal (cobranzas), el refresco de datos y el receptor de Apps Script."
+  "_nota": "Descuento (%) que se aplica a las notas BCV: es lo que separa los dólares a tasa BCV de los dólares reales, y el descuento normal por pago en divisas de una nota BCV. Si cambia la brecha, se cambia SOLO este número: lo leen el portal (cobranzas), el refresco de datos y el receptor de Apps Script.",
+  "iva": 16
 }
