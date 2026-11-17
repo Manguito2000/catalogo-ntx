@@ -46,13 +46,13 @@ function cobNav(v){
   $("navCob").setAttribute("aria-current", c ? "page" : "false"); $("navPed").setAttribute("aria-current", c ? "false" : "page");
 }
 const cbF0 = () => ({ ef:"", us:"", ze:"", bs:"", ta:"", rf:"" });
-const cbSt = c => c.est === "confirmado" ? `<span class="st ok">Confirmado</span>` : c.est === "revisar" ? `<span class="st low">Revisar</span>` : c.est === "cola" ? `<span class="st no">Sin enviar</span>` : `<span class="st low">Por confirmar</span>`;
+const cbSt = c => c.est === "confirmado" ? `<span class="st ok">Confirmado</span>` : c.est === "revisar" ? `<span class="st low">Revisar</span>` : c.est === "rechazo" ? `<span class="st no">No registrado</span>` : c.est === "cola" ? `<span class="st no">Sin enviar</span>` : `<span class="st low">Por confirmar</span>`;
 const cbHora = t => t ? new Date(t * 1000).toLocaleString("es-VE", { day:"2-digit", month:"short", hour:"numeric", minute:"2-digit" }) : "";
 /* acciones de un cobro: ver recibo siempre; corregir o anular solo mientras administración no lo haya confirmado */
 function cbAcc(c){
   const pe = pendiente(c), sure = CB.del === c.id, hay = cbNotas().some(n => n.id === c.n);
   return (c.rec ? `<button class="txt" data-cb="rec" data-id="${esc(c.id)}">Recibo</button>` : "") +
-    (!pe ? "" : sure ? `<button class="txt" data-cb="delok" data-id="${esc(c.id)}">Sí, anular</button><button class="txt" data-cb="delno" style="color:var(--mut)">No</button>`
+    (c.est === "rechazo" ? `<button class="txt" data-cb="delok" data-id="${esc(c.id)}">Quitar de la lista</button>` : !pe ? "" : sure ? `<button class="txt" data-cb="delok" data-id="${esc(c.id)}">Sí, anular</button><button class="txt" data-cb="delno" style="color:var(--mut)">No</button>`
       : (hay ? `<button class="txt" data-cb="edit" data-id="${esc(c.id)}">Corregir</button>` : "") + `<button class="txt" data-cb="delask" data-id="${esc(c.id)}">${c.est === "cola" ? "Descartar" : "Anular"}</button>`);
 }
 
@@ -99,9 +99,11 @@ function cbEntHtml(){
     <small class="hint">USDT ${money(T("us"))} · Zelle ${money(T("ze"))} · Bolívares ${money(T("bs"))} (en $) · ${pend.length} ${pend.length === 1 ? "cobro" : "cobros"} por confirmar</small></div>`;
   const card = c => `<article class="od"><div class="h"><b>${esc(c.cn || "Cliente")}</b>${cbSt(c)}</div>
       <div class="i num">${esc(c.rec || "Sin número")} · Nota ${esc(c.nn || "")} · ${esc(cbHora(c.t))}</div><div class="i num">${esc(cbMetodos(c))}${c.ta ? " · tasa " + c.ta : ""}${c.rf ? " · ref. " + esc(c.rf) : ""}</div>
-      ${c.est === "revisar" && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
+      ${(c.est === "revisar" || c.est === "rechazo") && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
       <div class="f"><span class="pr bs num">${money(c.nom)}</span>${cbAcc(c)}</div></article>`;
   h += pend.length ? pend.map(card).join("") : `<div class="box"><p class="hint">No tienes cobros por entregar. Cuando cobres, anótalo desde la pestaña Pendientes.</p></div>`;
+  const rech = todos.filter(c => c.est === "rechazo");
+  if(rech.length) h += `<h2 class="bs" style="margin-top:6px">No registrados</h2><p class="hint">Administración no aceptó estos cobros (casi siempre porque la nota ya aparece pagada en Holded). Si entregaste el recibo, avisa a administración.</p>` + rech.map(card).join("");
   if(conf.length) h += `<h2 class="bs" style="margin-top:6px">Confirmados esta semana</h2>` + conf.map(card).join("");
   return h;
 }
@@ -120,7 +122,7 @@ function cbFormHtml(){
     <div class="box"><div class="sel"><span><b>${esc(cbCliente(x.n.cid))}</b><small>${esc(x.n.num)}${bcv ? " · BCV" : ""} · ${esc(cbVTxt(cbVence(x.n)) || "sin vencimiento")}</small></span><span style="flex:none;text-align:right"><small>Falta por cobrar</small><b class="bs num" style="font-size:26px">${money(x.saldo)}</b></span></div>
       ${x.pc >= 0.01 ? `<p class="hint num">En Holded faltan ${money(x.n.real)} · ya anotaste ${money(x.pc)} por confirmar</p>` : ""}</div>`;
   if(mios.length && !ed) h += `<div class="box"><span class="lbl">Abonos que anotaste</span>` + mios.map(c => `<div class="cba"><div class="h"><b class="bs num">${money(c.nom)}</b>${cbSt(c)}</div>
-      <div class="i num">${esc(c.rec || "Sin número")} · ${esc(cbHora(c.t))} · ${esc(cbMetodos(c))}${c.ab !== c.nom ? " · abona " + money(c.ab) : ""}</div>${c.est === "revisar" && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
+      <div class="i num">${esc(c.rec || "Sin número")} · ${esc(cbHora(c.t))} · ${esc(cbMetodos(c))}${c.ab !== c.nom ? " · abona " + money(c.ab) : ""}</div>${(c.est === "revisar" || c.est === "rechazo") && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
       <div class="f">${cbAcc(c)}</div></div>`).join("") + `</div>`;
   if(x.saldo < 0.01 && !ed) return h + `<div class="box"><p class="hint">Esta nota ya está cobrada por completo. Sale de tu lista cuando administración registre el pago en Holded. Si te equivocaste en un monto, toca «Corregir» en el abono.</p></div>`;
   return h + `<div class="box"><span class="lbl">${ed ? "Montos corregidos" : mios.length ? "Registrar otro cobro" : "Registrar cobro"}</span>
@@ -198,11 +200,12 @@ async function cbEnviar(o){
   return { err:(r && r.msg) || "No se pudo guardar el cobro." };
 }
 async function cbFlush(){
-  if(CB.flushing || !CB.cola.length) return; CB.flushing = true;
+  if(CB.flushing || !CB.cola.some(o => o.est === "cola")) return; CB.flushing = true;
   for(const o of CB.cola.slice()){
+    if(o.est !== "cola") continue;
     const r = await cbEnviar(o); if(r.net) break;
-    CB.cola = CB.cola.filter(x => x.id !== o.id);
-    if(r.ok){ cbCambioRec(o, r.cobro); cbMerge(r.cobro); } else CB.avisos.push("El cobro de " + (o.cn || "un cliente") + " (" + money(o.nom) + ") no se pudo registrar: " + r.err);
+    if(r.ok){ CB.cola = CB.cola.filter(x => x.id !== o.id); cbCambioRec(o, r.cobro); cbMerge(r.cobro); }
+    else { o.est = "rechazo"; o.obs = r.err; CB.avisos.push("El cobro " + (o.rec || "") + " de " + (o.cn || "un cliente") + " (" + money(o.nom) + ") no quedó registrado en administración: " + r.err + " Sigue a la vista en «Por entregar»."); }
   }
   cbSave(); CB.flushing = false;
 }
@@ -236,7 +239,7 @@ async function cbGuardar(){
   }
   const o = { id:cbUid(), n:x.n.id, nn:x.n.num, cn:cbCliente(x.n.cid), t:Math.floor(Date.now() / 1000), nom:c.nom, ab:c.ab, ef:c.ef, us:c.us, ze:c.ze, bs:c.bs, ta:c.bs > 0 && x.n.tar !== "b" ? cbNum(CB.f.ta) : 0, rf:(CB.f.rf || "").trim().slice(0, 120), est:"cola", rec:cbSigRec() };
   const r = await cbEnviar(o); CB.busy = false;
-  if(r.err){ CB.err = r.err; cobRender(); return; }
+  if(r.err){ CB.err = /mayor que lo que falta/.test(r.err) ? r.err + ". Holded ya tiene registrado un pago de esta nota; el saldo de esta pantalla estaba atrasado y se está actualizando." : r.err; CB.t0 = 0; cobRender(); cbRefresca(); return; }
   let cobro;
   if(r.ok){ cobro = r.cobro; cbCambioRec(o, cobro); cbMerge(cobro); } else { cobro = o; CB.cola.push(o); cbSave(); }
   CB.f = cbF0(); CB.nota = null; CB.ok = { cobro }; cobRender(); cobBadge(); window.scrollTo(0, 0);
@@ -301,7 +304,7 @@ $("vCob").addEventListener("click", async e => {
   else if(k === "delno"){ CB.del = null; cobRender(); }
   else if(k === "delok"){
     const c = cbCobros().find(x => x.id === a.dataset.id); CB.del = null; if(!c){ cobRender(); return; }
-    if(c.est === "cola"){ CB.cola = CB.cola.filter(x => x.id !== c.id); cbSave(); cobRender(); cobBadge(); return; }
+    if(c.est === "cola" || c.est === "rechazo"){ CB.cola = CB.cola.filter(x => x.id !== c.id); cbSave(); cobRender(); cobBadge(); return; }
     try{ const r = await cbSrv("anular", { r:c.rec }); if(r && r.estado === "ok" && Array.isArray(r.cobros)){ CB.cobros = r.cobros; cbSave(); } else CB.avisos.push((r && r.msg) || "No se pudo anular el cobro."); }
     catch(err){ CB.avisos.push("Sin conexión: no se pudo anular el cobro. Intenta de nuevo."); }
     cobRender(); cobBadge();
