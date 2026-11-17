@@ -30,7 +30,9 @@ cl = sorted(([x['id'], ' '.join((x.get('name') or '').split()), ((x.get('tags') 
              if x.get('type') == 'client' and (x.get('name') or '').strip() and x['id'] != NUEVO['id']), key=lambda r: r[1].upper())
 assert len(precios) > 50 and len(cl) > 50, 'Holded devolvió muy pocos datos; no se toca datos.json'
 # --- Cobranzas: notas pendientes (y saldadas hace poco) por cliente. Solo lectura de Holded.
-# Cada nota: [id, número, idCliente, fecha, vence, total, pagado, pendiente, tarifa, desc%, saldoReal, saldoBs, [[idPago, monto, fecha]]]
+# Cada nota: [id, número, idCliente, fecha, vence, total, pagado, pendiente, tarifa, desc%, saldoReal, saldoBs, [[idPago, monto, fecha]], factura]
+#   factura = [número, iva] si la nota ya tiene factura AdriMan (etiquetas fac###### e iva##### que pone Claude al emitirla; iva en centavos de
+#   dólares de la nota, None si no vino), o None. El portal muestra la nota con su factura y el IVA aparte del neto.
 #   tarifa: 'u' USD, 'l' Lista, 'b' BCV, '?' no se pudo determinar (se deduce comparando los precios de la nota con las tarifas actuales).
 #   saldoReal = lo que falta en dólares reales (lo que cuenta Holded una vez puesto el descuento BCV). En una nota BCV sin el descuento todavía: pendiente x (1 - descuento_bcv).
 #   saldoBs   = solo notas BCV: lo que falta en dólares a tasa BCV (lo que ve y cobra el vendedor): pendiente / (1 - desc% de la nota), o el pendiente si aún no tiene descuento. En las demás va null.
@@ -51,6 +53,13 @@ def tarifa(n):
         if c[0] <= 0.02: v[c[1]] += 1
     q = max(v, key=v.get)
     return q if m and v[q] * 2 > m else '?'
+def factura(tags):
+    f = iva = None
+    for t in tags or []:
+        t = str(t).lower(); m = re.fullmatch(r'fac(\d{1,10})', t); v = re.fullmatch(r'iva(\d{1,12})', t)
+        if m: f = m.group(1).zfill(6)
+        if v: iva = int(v.group(1)) / 100
+    return [f, iva] if f else None
 tagcl = {x['id']: ((x.get('tags') or [''])[0] or '') for x in conts}
 corte = datetime.datetime.now().timestamp() - 21 * 86400; nt = {}
 for n in notas:
@@ -61,7 +70,7 @@ for n in notas:
     real = round(pen * FBCV, 2) if t == 'b' and d == 0 else pen
     bcv = (round(pen / (1 - d / 100), 2) if d > 0 else pen) if t == 'b' else None   # lo que falta en dólares a tasa BCV
     nt.setdefault(tagcl.get(n.get('contact'), ''), []).append([n['id'], n['docNumber'], n.get('contact'), n.get('date'), n.get('dueDate') or None,
-        round(float(n.get('total') or 0), 2), round(float(n.get('paymentsTotal') or 0), 2), pen, t, d, real, bcv, pag])
+        round(float(n.get('total') or 0), 2), round(float(n.get('paymentsTotal') or 0), 2), pen, t, d, real, bcv, pag, factura(n.get('tags'))])
 assert len(notas) > 100, 'Holded devolvió muy pocas notas; no se toca datos.json'
 ahora = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'); b64 = lambda b: base64.b64encode(b).decode(); blobs = []
 for v in json.load(open(a.vendedores, encoding='utf-8'))['v']:

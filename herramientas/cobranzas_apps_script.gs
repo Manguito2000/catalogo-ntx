@@ -9,7 +9,7 @@
 // Solo LEE Holded. Nunca registra pagos ni cambia nada allá.
 var COB_COLS = ["Recibo", "Fecha", "Vendedor", "Cliente", "Nota", "Cobrado $", "Abono real $", "Efectivo $", "USDT $", "Zelle $", "Bs (en $)", "Tasa", "Referencia",
   "Estado", "Observación", "Confirmado el", "ts", "tag", "notaId", "uid", "base", "pagos", "dispositivo",
-  "Tarifa", "Desc. divisas %", "Abono a la nota $"];   // columnas nuevas al final (nov 2026): BCV o USD, descuento por pago en divisas, abono en dólares de la nota
+  "Tarifa", "Desc. divisas %", "Abono a la nota $", "Factura"];   // columnas nuevas al final (nov 2026): BCV o USD, descuento por pago en divisas, abono en dólares de la nota, factura AdriMan de la nota
 
 /* Descuento BCV (%): un solo número para todo el sistema, en config.json del repositorio del portal. Se lee cada 10 minutos; si no responde, 15. */
 function descuentoBcv() {
@@ -22,14 +22,22 @@ function descuentoBcv() {
 }
 var COB = {}; COB_COLS.forEach(function (c, i) { COB[c] = i; });
 
+// Rutas de cobranzas y facturas. En el receptor, doGet las enruta con: if (esCobranzas(q.a)) return json(cobranzas(q));
+var COB_ACC = { cobro: 1, cobros: 1, anular: 1, solfac: 1, solcancel: 1, ret: 1, adm: 1, admacc: 1 };
+function esCobranzas(a) { return COB_ACC.hasOwnProperty(String(a || "")); }
 function cobranzas(q) {
   try {
+    if (q.a === "adm" || q.a === "admacc") return fcAdmin(q);           // bandeja de Mango (Pedidos NTX), con la llave ADMIN
     var tag = vendedorDe(q);
     if (!tag) return { estado: "no", msg: "Dispositivo o código no autorizado" };
     if (q.a === "cobro") return cobroNuevo(tag, q);
     if (q.a === "anular") return cobroAnular(tag, q);
+    if (q.a === "solfac") return fcSolicitar(tag, q);
+    if (q.a === "solcancel") return fcCancelar(tag, q);
+    if (q.a === "ret") return fcRetencion(tag, fcLee(q.x), "");
     var vivo = null; try { vivo = saldosVivos(q.ids); } catch (e2) {}          // si Holded falla, los cobros se devuelven igual
-    return { estado: "ok", cobros: cobrosDe(tag), nt: vivo };
+    var fx = { sol: [], ret: {} }; try { fx = fcDelVendedor(tag); } catch (e3) {}
+    return { estado: "ok", cobros: cobrosDe(tag), nt: vivo, sol: fx.sol, ret: fx.ret };
   } catch (err) { return { estado: "error", msg: String(err && err.message || err) }; }
 }
 // Mismo control que el portero: código correcto, vendedor no bloqueado y dispositivo ya aprobado.
@@ -82,6 +90,7 @@ function cobroNuevo(tag, q) {
     pon("Bs (en $)", bs || ""); pon("Tasa", num(c.ta) || ""); pon("Referencia", String(c.rf || "").replace(/^[=+@-]+/, "").slice(0, 120)); pon("Estado", "cobrado");
     pon("ts", Math.floor(ahora.getTime() / 1000)); pon("tag", tag); pon("notaId", nid); pon("uid", uid); pon("base", JSON.stringify(base)); pon("pagos", "[]");
     pon("Tarifa", tb ? "BCV" : "USD"); pon("Desc. divisas %", dd || ""); pon("Abono a la nota $", bv);
+    var fac = fcDeTags(nota.tags); if (fac) pon("Factura", "'" + fac[0]);   // el pago de una nota facturada se registra con su número de factura
     pon("dispositivo", corto(String(q.d || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 40)));
     hoja.appendRow(fila);
     props.setProperty("COB_N_" + tag, String(n));
@@ -104,10 +113,10 @@ function cobrosDe(tag) {
   var corte = Date.now() / 1000 - 7 * 86400;
   return leerCobros(hojaCobros()).filter(function (f) { return f.tag === tag && (f.estado === "cobrado" || f.estado === "revisar" || f.ts >= corte); }).map(vista);
 }
-function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos, dd: f.dd, bv: f.bv || null, tb: f.tarifa === "BCV" ? "b" : "" }; }
+function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos, dd: f.dd, bv: f.bv || null, tb: f.tarifa === "BCV" ? "b" : "", fa: f.fa || "" }; }
 
 /* Saldos al momento: el teléfono manda los ids de las notas que tiene (?ids=a,b,c) y recibe cómo están AHORA en Holded:
-   { id: [total, pagado, pendiente, descuento %, [[idPago, monto, fecha]]] }. Así una nota cobrada en administración deja de salirle
+   { id: [total, pagado, pendiente, descuento %, [[idPago, monto, fecha]], [factura, iva] | null] }. Así una nota cobrada en administración deja de salirle
    como pendiente al vendedor sin esperar al refresco de datos. Se guarda un minuto en memoria para no llamar a Holded en cada toque. */
 function saldosVivos(ids) {
   var pedidos = String(ids || "").split(",").filter(function (x) { return /^[a-f0-9]{24}$/.test(x); }).slice(0, 80);
@@ -121,7 +130,7 @@ function saldosVivos(ids) {
       docs.forEach(function (d) {
         var pagos = (d.paymentsDetail || []).map(function (y) { return [y.id, Math.round(Number(y.amount) * 100) / 100, y.date]; });
         var hace = Date.now() / 1000 - 30 * 86400, reciente = pagos.some(function (y) { return y[2] >= hace; });
-        if ((Number(d.paymentsPending) || 0) >= 0.01 || reciente) mapa[d.id] = [Number(d.total) || 0, Number(d.paymentsTotal) || 0, Number(d.paymentsPending) || 0, Number(d.discount) || 0, pagos];
+        if ((Number(d.paymentsPending) || 0) >= 0.01 || reciente) mapa[d.id] = [Number(d.total) || 0, Number(d.paymentsTotal) || 0, Number(d.paymentsPending) || 0, Number(d.discount) || 0, pagos, fcDeTags(d.tags)];
       });
       if (docs.length < 500) break;
     }
@@ -151,6 +160,7 @@ function conciliarCobros() {
         escribir(hoja, f.fila, v);
       });
     });
+    try { fcMarcarEmitidas(); } catch (e4) {}                                   // solicitudes de factura ya emitidas (etiqueta fac###### en la nota)
     if (avisos.length) aviso("cobros por revisar (" + avisos.length + ")", "Estos cobros anotados por los vendedores no se pudieron confirmar solos contra Holded:\n\n" + avisos.join("\n\n") +
       "\n\nEn la hoja puedes escribir \"confirmado\" o \"anulado\" en la columna Estado para resolverlos a mano:\n" + hoja.getParent().getUrl());
     return hechos + " confirmados, " + avisos.length + " por revisar";
@@ -172,7 +182,7 @@ function leerCobros(hoja) {
     out.push({ fila: i + 1, recibo: String(r[COB["Recibo"]]), vendedor: String(r[COB["Vendedor"]]), cliente: String(r[COB["Cliente"]]), nota: String(r[COB["Nota"]]),
       nominal: N(r[COB["Cobrado $"]]), abono: N(r[COB["Abono real $"]]), ef: N(r[COB["Efectivo $"]]), us: N(r[COB["USDT $"]]), ze: N(r[COB["Zelle $"]]), bs: N(r[COB["Bs (en $)"]]),
       tasa: N(r[COB["Tasa"]]), ref: String(r[COB["Referencia"]]), estado: String(r[COB["Estado"]]).trim().toLowerCase(), obs: String(r[COB["Observación"]]),
-      tarifa: String(r[COB["Tarifa"]] || ""), dd: N(r[COB["Desc. divisas %"]]), bv: N(r[COB["Abono a la nota $"]]),
+      tarifa: String(r[COB["Tarifa"]] || ""), fa: String(r[COB["Factura"]] || ""), dd: N(r[COB["Desc. divisas %"]]), bv: N(r[COB["Abono a la nota $"]]),
       ts: N(r[COB["ts"]]), tag: String(r[COB["tag"]]), notaId: String(r[COB["notaId"]]), uid: String(r[COB["uid"]]), base: J(r[COB["base"]]), pagos: J(r[COB["pagos"]]) });
   }
   return out;
@@ -274,3 +284,175 @@ function saldoVisible(saldoReal, cobros) {
   return { porConfirmar: Math.round(p * 100) / 100, saldo: Math.max(0, Math.round((saldoReal - p) * 100) / 100) };
 }
 if (typeof module !== "undefined") module.exports = { conciliar: conciliar, saldoVisible: saldoVisible };
+
+/* =====================================================================================================================
+   FACTURAS AdriMan desde el portal (nov 2026)
+   - El vendedor pide la factura legal de una nota (?a=solfac) con comentarios. No sale ningún correo: la solicitud queda en la
+     hoja "Solicitudes factura" y Mango la ve en su app (Pedidos NTX) con ?a=adm&k=ADMIN.
+   - Cuando Claude emite la factura fiscal, etiqueta la nota en Holded con fac###### (y iva##### = IVA en centavos de dólares
+     de la nota). La conciliación de cada hora marca la solicitud como "emitida" y el portal muestra la nota con su factura.
+   - Retención de IVA: el vendedor marca si el cliente retiene (0, 75 o 100 %) y cómo llega el comprobante: adjunto (se sube
+     desde el teléfono a Google Drive, carpeta "Retenciones NTX"), WhatsApp o físico. Hoja "Retenciones" (una fila por nota).
+   ===================================================================================================================== */
+var FC_SOL = ["Fecha", "Vendedor", "Cliente", "Nota", "Comentarios", "Estado", "Factura", "Atendida el", "ts", "tag", "notaId", "uid"];
+var FC_RET = ["Fecha", "Vendedor", "Cliente", "Nota", "Factura", "Retención %", "Comprobante", "Archivo", "Recibido en administración", "ts", "tag", "notaId"];
+var FC_CP = { "": "", adjunto: "adjunto", whatsapp: "whatsapp", fisico: "fisico" };
+
+/* etiquetas de la nota → [número de factura, IVA en dólares de la nota | null], o null si no está facturada */
+function fcDeTags(tags) {
+  var f = null, iva = null;
+  (tags || []).forEach(function (t) {
+    t = String(t).toLowerCase(); var m = /^fac(\d{1,10})$/.exec(t), v = /^iva(\d{1,12})$/.exec(t);
+    if (m) f = ("000000" + m[1]).slice(-Math.max(6, m[1].length));
+    if (v) iva = Number(v[1]) / 100;
+  });
+  return f ? [f, iva] : null;
+}
+function fcLee(x) {
+  var b64 = String(x || "");
+  if (!/^[A-Za-z0-9_-]{8,4000}$/.test(b64)) return null;
+  while (b64.length % 4) b64 += "=";
+  try { return JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(b64)).getDataAsString("UTF-8")); } catch (e) { return null; }
+}
+/* la nota, solo si es de un cliente del vendedor */
+function fcNota(tag, nid) {
+  nid = String(nid || "").replace(/[^a-f0-9]/g, "");
+  if (nid.length !== 24) throw new Error("Nota no válida");
+  var nota = holded("documents/invoice/" + nid), cont = holded("contacts/" + nota.contact);
+  if (((cont.tags || [""])[0] || "") !== tag) throw new Error("Esa nota no es de un cliente de tu cartera");
+  return nota;
+}
+function fcHoja(nombre, cols) {
+  var libro = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty("COB_HOJA") || ""), h = libro.getSheetByName(nombre);
+  if (!h) {
+    h = libro.insertSheet(nombre); h.getRange(1, 1, 1, cols.length).setValues([cols]).setFontWeight("bold"); h.setFrozenRows(1);
+    ["Nota", "Factura", "ts", "tag", "notaId", "uid"].forEach(function (c) { var i = cols.indexOf(c); if (i >= 0) h.getRange(1, i + 1, h.getMaxRows(), 1).setNumberFormat("@"); });
+    h.hideColumns(cols.indexOf("ts") + 1, cols.length - cols.indexOf("ts"));
+  }
+  return h;
+}
+function fcFilas(h, cols) {
+  var v = h.getDataRange().getValues(), out = [];
+  for (var i = 1; i < v.length; i++) { var o = { fila: i + 1 }; cols.forEach(function (c, k) { o[c] = v[i][k]; }); if (o.notaId) out.push(o); }
+  return out;
+}
+function fcPon(h, cols, fila, vals) { for (var k in vals) h.getRange(fila, cols.indexOf(k) + 1).setValue(vals[k]); }
+function fcFila(cols, vals) { return cols.map(function (c) { return vals.hasOwnProperty(c) ? vals[c] : ""; }); }
+var fcTxt = function (s, n) { return String(s || "").replace(/^[=+@-]+/, "").replace(/[\u0000-\u0008\u000B-\u001F]/g, "").slice(0, n); };
+function fcSolVista(o) { return { id: String(o.uid), n: String(o.notaId), nn: String(o.Nota), cn: String(o.Cliente), t: Number(o.ts) || 0, cm: String(o.Comentarios), est: String(o.Estado).trim().toLowerCase(), fa: String(o.Factura || ""), ven: String(o.Vendedor), at: String(o["Atendida el"] || "") }; }
+function fcRetVista(o) { return { n: String(o.notaId), nn: String(o.Nota), cn: String(o.Cliente), fa: String(o.Factura || ""), rt: Number(o["Retención %"]) || 0, cp: String(o.Comprobante || ""), url: String(o.Archivo || ""), rec: String(o["Recibido en administración"] || ""), t: Number(o.ts) || 0, ven: String(o.Vendedor) }; }
+
+/* ---- vendedor ---- */
+function fcSolicitar(tag, q) {
+  var x = fcLee(q.x); if (!x) return { estado: "error", msg: "Solicitud incompleta" };
+  var nota = fcNota(tag, x.n), ya = fcDeTags(nota.tags);
+  if (ya) return { estado: "error", msg: "Esta nota ya tiene la factura " + ya[0] };
+  var cm = fcTxt(x.cm, 600), lock = LockService.getScriptLock(); lock.waitLock(25000);
+  try {
+    var h = fcHoja("Solicitudes factura", FC_SOL), filas = fcFilas(h, FC_SOL), ahora = new Date();
+    var abierta = filas.filter(function (o) { return o.notaId === nota.id && String(o.Estado).trim().toLowerCase() === "pendiente"; })[0];
+    if (abierta) fcPon(h, FC_SOL, abierta.fila, { "Comentarios": cm, "Fecha": fecha(ahora.toISOString()), "ts": Math.floor(ahora.getTime() / 1000) });
+    else h.appendRow(fcFila(FC_SOL, { "Fecha": fecha(ahora.toISOString()), "Vendedor": VENDEDORES[tag].nombre, "Cliente": fcTxt(nota.contactName, 120), "Nota": String(nota.docNumber || ""),
+      "Comentarios": cm, "Estado": "pendiente", "ts": Math.floor(ahora.getTime() / 1000), "tag": tag, "notaId": nota.id, "uid": Utilities.getUuid().slice(0, 13) }));
+    return { estado: "ok", actualizada: !!abierta, sol: fcDelVendedor(tag).sol };
+  } finally { lock.releaseLock(); }
+}
+function fcCancelar(tag, q) {
+  var id = String(q.r || ""), lock = LockService.getScriptLock(); lock.waitLock(25000);
+  try {
+    var h = fcHoja("Solicitudes factura", FC_SOL), o = fcFilas(h, FC_SOL).filter(function (x) { return String(x.uid) === id && x.tag === tag; })[0];
+    if (!o) return { estado: "error", msg: "No encontré esa solicitud" };
+    if (String(o.Estado).trim().toLowerCase() !== "pendiente") return { estado: "error", msg: "Esa solicitud ya fue atendida" };
+    fcPon(h, FC_SOL, o.fila, { "Estado": "cancelada", "Atendida el": "Cancelada por el vendedor el " + fecha(new Date().toISOString()) });
+    return { estado: "ok", sol: fcDelVendedor(tag).sol };
+  } finally { lock.releaseLock(); }
+}
+/* r = {n, rt (0|75|100), cp ("", adjunto, whatsapp, fisico)}; url = enlace del archivo subido (si lo hay) */
+function fcRetencion(tag, r, url) {
+  if (!r) return { estado: "error", msg: "Datos incompletos" };
+  var rt = [0, 75, 100].indexOf(Number(r.rt)) >= 0 ? Number(r.rt) : -1, cp = FC_CP.hasOwnProperty(String(r.cp || "")) ? String(r.cp || "") : null;
+  if (rt < 0 || cp === null) return { estado: "error", msg: "Datos de retención no válidos" };
+  var nota = fcNota(tag, r.n), fac = fcDeTags(nota.tags), lock = LockService.getScriptLock(); lock.waitLock(25000);
+  try {
+    var h = fcHoja("Retenciones", FC_RET), o = fcFilas(h, FC_RET).filter(function (x) { return x.notaId === nota.id; })[0], ahora = new Date();
+    var v = { "Fecha": fecha(ahora.toISOString()), "Vendedor": VENDEDORES[tag].nombre, "Cliente": fcTxt(nota.contactName, 120), "Nota": String(nota.docNumber || ""),
+      "Factura": fac ? fac[0] : "", "Retención %": rt, "Comprobante": rt ? cp : "", "ts": Math.floor(ahora.getTime() / 1000), "tag": tag, "notaId": nota.id };
+    if (url) v["Archivo"] = url;                                          // sin archivo nuevo, se conserva el que ya hubiera
+    if (o) fcPon(h, FC_RET, o.fila, v); else h.appendRow(fcFila(FC_RET, v));
+    return { estado: "ok", ret: fcDelVendedor(tag).ret };
+  } finally { lock.releaseLock(); }
+}
+/* lo que ve el vendedor: sus solicitudes (pendientes y las de los últimos 30 días) y la retención de sus notas */
+function fcDelVendedor(tag) {
+  var lib = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty("COB_HOJA") || ""), corte = Date.now() / 1000 - 30 * 86400, out = { sol: [], ret: {} };
+  var hs = lib.getSheetByName("Solicitudes factura"), hr = lib.getSheetByName("Retenciones");
+  if (hs) out.sol = fcFilas(hs, FC_SOL).filter(function (o) { return o.tag === tag && (String(o.Estado).trim().toLowerCase() === "pendiente" || Number(o.ts) >= corte); }).map(fcSolVista);
+  if (hr) fcFilas(hr, FC_RET).forEach(function (o) { if (o.tag === tag) out.ret[o.notaId] = fcRetVista(o); });
+  return out;
+}
+
+/* ---- comprobante de retención adjunto: llega por POST (la imagen o el PDF no caben en una dirección) ---- */
+// Cuerpo (texto JSON): {a:"ret", cod, d, x:{n, rt}, nombre, tipo, b64}
+function doPost(e) {
+  try {
+    var b = JSON.parse((e && e.postData && e.postData.contents) || "{}");
+    if (b.a !== "ret") return json({ estado: "error", msg: "Acción desconocida" });
+    var tag = vendedorDe(b); if (!tag) return json({ estado: "no", msg: "Dispositivo o código no autorizado" });
+    var tipo = String(b.tipo || ""), ext = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" }[tipo];
+    if (!ext) return json({ estado: "error", msg: "Solo se aceptan fotos o PDF" });
+    var bytes = Utilities.base64Decode(String(b.b64 || ""));
+    if (bytes.length < 200 || bytes.length > 9 * 1024 * 1024) return json({ estado: "error", msg: "El archivo está vacío o pesa más de 9 MB" });
+    var x = b.x || {}, nota = fcNota(tag, x.n), fac = fcDeTags(nota.tags);
+    var nombre = "Retencion_" + (fac ? "F" + fac[0] + "_" : "") + String(nota.docNumber || "") + "_" + fcTxt(nota.contactName, 40).replace(/[^\wÁÉÍÓÚÑáéíóúñ .-]/g, "") +
+      "_" + Utilities.formatDate(new Date(), "America/Caracas", "yyyy-MM-dd_HHmm") + "." + ext;
+    var f = fcCarpeta().createFile(Utilities.newBlob(bytes, tipo, nombre));
+    return json(fcRetencion(tag, { n: nota.id, rt: x.rt, cp: "adjunto" }, f.getUrl()));
+  } catch (err) { return json({ estado: "error", msg: String(err && err.message || err) }); }
+}
+function fcCarpeta() {
+  var props = PropertiesService.getScriptProperties(), id = props.getProperty("COB_RET_DIR");
+  if (id) try { return DriveApp.getFolderById(id); } catch (e) {}
+  var c = DriveApp.createFolder("Retenciones NTX"); props.setProperty("COB_RET_DIR", c.getId()); return c;
+}
+
+/* ---- cada hora (desde conciliarCobros): solicitudes cuya nota ya tiene factura ---- */
+function fcMarcarEmitidas() {
+  var lib = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty("COB_HOJA") || "");
+  var hs = lib.getSheetByName("Solicitudes factura"), hr = lib.getSheetByName("Retenciones");
+  if (hs) fcFilas(hs, FC_SOL).forEach(function (o) {
+    if (String(o.Estado).trim().toLowerCase() !== "pendiente") return;
+    var nota; try { nota = holded("documents/invoice/" + o.notaId); } catch (e) { return; }
+    var fac = fcDeTags(nota.tags);
+    if (fac) fcPon(hs, FC_SOL, o.fila, { "Estado": "emitida", "Factura": fac[0], "Atendida el": fecha(new Date().toISOString()) });
+  });
+  if (hr) fcFilas(hr, FC_RET).forEach(function (o) {                    // retenciones marcadas antes de que existiera el número de factura
+    if (o.Factura) return;
+    var nota; try { nota = holded("documents/invoice/" + o.notaId); } catch (e) { return; }
+    var fac = fcDeTags(nota.tags); if (fac) fcPon(hr, FC_RET, o.fila, { "Factura": fac[0] });
+  });
+}
+
+/* ---- bandeja de Mango (Pedidos NTX): ?a=adm&k=ADMIN  ·  ?a=admacc&k=ADMIN&s=<id solicitud>&e=pendiente|descartada  ·  &r=<id nota>&e=recibido|pendiente ---- */
+function fcAdmin(q) {
+  if (String(q.k || "") !== ADMIN) return { estado: "no", msg: "No autorizado" };
+  var lib = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty("COB_HOJA") || "");
+  if (q.a === "admacc") {
+    var lock = LockService.getScriptLock(); lock.waitLock(25000);
+    try {
+      var e = String(q.e || "");
+      if (q.s) {
+        var hs = fcHoja("Solicitudes factura", FC_SOL), o = fcFilas(hs, FC_SOL).filter(function (x) { return String(x.uid) === String(q.s); })[0];
+        if (!o || ["pendiente", "descartada"].indexOf(e) < 0) return { estado: "error", msg: "Solicitud o acción no válida" };
+        fcPon(hs, FC_SOL, o.fila, { "Estado": e, "Atendida el": e === "pendiente" ? "" : fecha(new Date().toISOString()) });
+      } else if (q.r) {
+        var hr = fcHoja("Retenciones", FC_RET), w = fcFilas(hr, FC_RET).filter(function (x) { return x.notaId === String(q.r); })[0];
+        if (!w || ["recibido", "pendiente"].indexOf(e) < 0) return { estado: "error", msg: "Retención o acción no válida" };
+        fcPon(hr, FC_RET, w.fila, { "Recibido en administración": e === "recibido" ? fecha(new Date().toISOString()) : "" });
+      } else return { estado: "error", msg: "Falta qué atender" };
+    } finally { lock.releaseLock(); }
+  }
+  var corte = Date.now() / 1000 - 21 * 86400, hs2 = lib.getSheetByName("Solicitudes factura"), hr2 = lib.getSheetByName("Retenciones");
+  return { estado: "ok",
+    sol: hs2 ? fcFilas(hs2, FC_SOL).filter(function (o) { return String(o.Estado).trim().toLowerCase() === "pendiente" || Number(o.ts) >= corte; }).map(fcSolVista).sort(function (a, b) { return b.t - a.t; }) : [],
+    ret: hr2 ? fcFilas(hr2, FC_RET).map(fcRetVista).filter(function (r) { return r.rt > 0 && (!r.rec || r.t >= corte); }).sort(function (a, b) { return b.t - a.t; }) : [] };
+}
