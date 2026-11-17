@@ -8,7 +8,18 @@
 //   instalarCobranzas()  se ejecuta UNA vez a mano: crea la hoja "Cobranzas NTX" y el reloj de cada hora
 // Solo LEE Holded. Nunca registra pagos ni cambia nada allá.
 var COB_COLS = ["Recibo", "Fecha", "Vendedor", "Cliente", "Nota", "Cobrado $", "Abono real $", "Efectivo $", "USDT $", "Zelle $", "Bs (en $)", "Tasa", "Referencia",
-  "Estado", "Observación", "Confirmado el", "ts", "tag", "notaId", "uid", "base", "pagos", "dispositivo"];
+  "Estado", "Observación", "Confirmado el", "ts", "tag", "notaId", "uid", "base", "pagos", "dispositivo",
+  "Tarifa", "Desc. divisas %", "Abono a la nota $"];   // columnas nuevas al final (nov 2026): BCV o USD, descuento por pago en divisas, abono en dólares de la nota
+
+/* Descuento BCV (%): un solo número para todo el sistema, en config.json del repositorio del portal. Se lee cada 10 minutos; si no responde, 15. */
+function descuentoBcv() {
+  var cache = CacheService.getScriptCache(), v = Number(cache.get("COB_DBCV"));
+  if (v > 0) return v;
+  try { v = Number(JSON.parse(UrlFetchApp.fetch("https://manguito2000.github.io/catalogo-ntx/config.json", { muteHttpExceptions: true }).getContentText()).descuento_bcv); } catch (e) { v = 0; }
+  if (!(v > 0 && v < 90)) v = 15;
+  try { cache.put("COB_DBCV", String(v), 600); } catch (e) {}
+  return v;
+}
 var COB = {}; COB_COLS.forEach(function (c, i) { COB[c] = i; });
 
 function cobranzas(q) {
@@ -42,16 +53,21 @@ function cobroNuevo(tag, q) {
   if (uid.length < 8 || nid.length !== 24) return { estado: "error", msg: "Cobro incompleto" };
   if (nom <= 0) return { estado: "error", msg: "El monto debe ser mayor que cero" };
   // El abono real solo puede ser menor que lo cobrado por la parte en bolívares de una nota BCV (x 0,85).
-  if (ab > nom + 0.01 || ab < ef + us + ze + bs * 0.85 - 0.02) return { estado: "error", msg: "El abono no cuadra con lo cobrado" };
+  var F = 1 - descuentoBcv() / 100, tb = c.tb === "b", dd = tb ? Math.max(0, Math.min(50, Number(c.dd) || 0)) : 0;
+  var bv = tb ? Math.round((bs + (ef + us + ze) / (1 - dd / 100)) * 100) / 100 : nom;   // abono en dólares de la nota (BCV o USD)
+  if (ab > nom + 0.01 || ab < ef + us + ze + bs * (tb ? F : 1) - 0.02) return { estado: "error", msg: "El abono no cuadra con lo cobrado" };
   var lock = LockService.getScriptLock(); lock.waitLock(25000);
   try {
     var hoja = hojaCobros(), filas = leerCobros(hoja);
     for (var i = 0; i < filas.length; i++) if (filas[i].uid === uid) return { estado: "ok", repetido: true, cobro: vista(filas[i]) };   // reenvío del mismo cobro
     var nota = holded("documents/invoice/" + nid), cont = holded("contacts/" + nota.contact);
     if (((cont.tags || [""])[0] || "") !== tag) return { estado: "error", msg: "Esa nota no es de un cliente de tu cartera" };
-    var pend = Number(nota.paymentsPending) || 0, mios = filas.filter(function (f) { return f.notaId === nid && (f.estado === "cobrado" || f.estado === "revisar"); })
-      .reduce(function (s, f) { return s + f.abono; }, 0);
-    if (ab > pend - mios + 0.5) return { estado: "error", msg: "El abono ($" + ab.toFixed(2) + ") es mayor que lo que falta de la nota ($" + Math.max(0, pend - mios).toFixed(2) + ")" };
+    // Todo se compara en dólares de la nota: en una nota BCV, lo que falta en Holded (reales) se lleva a dólares BCV con el descuento de la nota
+    var pend = Number(nota.paymentsPending) || 0, dn = Number(nota.discount) || 0;
+    var pendN = tb ? (dn > 0 ? pend / (1 - dn / 100) : pend) : pend;
+    var mios = filas.filter(function (f) { return f.notaId === nid && (f.estado === "cobrado" || f.estado === "revisar"); })
+      .reduce(function (s, f) { return s + (f.bv || (f.tarifa === "BCV" ? f.abono / F : f.abono)); }, 0);
+    if (bv > pendN - mios + 0.5) return { estado: "error", msg: "El abono ($" + bv.toFixed(2) + (tb ? " BCV" : "") + ") es mayor que lo que falta de la nota ($" + Math.max(0, pendN - mios).toFixed(2) + (tb ? " BCV" : "") + ")" };
     var props = PropertiesService.getScriptProperties(), n = Number(props.getProperty("COB_N_" + tag) || 0) + 1, ahora = new Date();
     var pre = VENDEDORES[tag].pre || tag.charAt(0).toUpperCase(), rec = pre + "-" + ("000" + n).slice(-4);
     // El teléfono propone el número (así entrega el recibo en el momento, incluso sin conexión). Se respeta si es de este vendedor y nadie lo usó.
@@ -65,6 +81,7 @@ function cobroNuevo(tag, q) {
     pon("Nota", String(nota.docNumber || "")); pon("Cobrado $", nom); pon("Abono real $", ab); pon("Efectivo $", ef || ""); pon("USDT $", us || ""); pon("Zelle $", ze || "");
     pon("Bs (en $)", bs || ""); pon("Tasa", num(c.ta) || ""); pon("Referencia", String(c.rf || "").replace(/^[=+@-]+/, "").slice(0, 120)); pon("Estado", "cobrado");
     pon("ts", Math.floor(ahora.getTime() / 1000)); pon("tag", tag); pon("notaId", nid); pon("uid", uid); pon("base", JSON.stringify(base)); pon("pagos", "[]");
+    pon("Tarifa", tb ? "BCV" : "USD"); pon("Desc. divisas %", dd || ""); pon("Abono a la nota $", bv);
     pon("dispositivo", corto(String(q.d || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 40)));
     hoja.appendRow(fila);
     props.setProperty("COB_N_" + tag, String(n));
@@ -87,7 +104,7 @@ function cobrosDe(tag) {
   var corte = Date.now() / 1000 - 7 * 86400;
   return leerCobros(hojaCobros()).filter(function (f) { return f.tag === tag && (f.estado === "cobrado" || f.estado === "revisar" || f.ts >= corte); }).map(vista);
 }
-function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos }; }
+function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos, dd: f.dd, bv: f.bv || null, tb: f.tarifa === "BCV" ? "b" : "" }; }
 
 /* Saldos al momento: el teléfono manda los ids de las notas que tiene (?ids=a,b,c) y recibe cómo están AHORA en Holded:
    { id: [total, pagado, pendiente, descuento %, [[idPago, monto, fecha]]] }. Así una nota cobrada en administración deja de salirle
@@ -144,7 +161,9 @@ function conciliarCobros() {
 function hojaCobros() {
   var id = PropertiesService.getScriptProperties().getProperty("COB_HOJA");
   if (!id) throw new Error("Falta instalar cobranzas (ejecuta instalarCobranzas una vez)");
-  return SpreadsheetApp.openById(id).getSheetByName("Cobros");
+  var h = SpreadsheetApp.openById(id).getSheetByName("Cobros");
+  if (h.getLastColumn() < COB_COLS.length) h.getRange(1, 1, 1, COB_COLS.length).setValues([COB_COLS]).setFontWeight("bold");   // hoja creada con menos columnas
+  return h;
 }
 function leerCobros(hoja) {
   var v = hoja.getDataRange().getValues(), out = [], N = function (x) { return Number(x) || 0; }, J = function (x) { try { return JSON.parse(x || "[]"); } catch (e) { return []; } };
@@ -153,6 +172,7 @@ function leerCobros(hoja) {
     out.push({ fila: i + 1, recibo: String(r[COB["Recibo"]]), vendedor: String(r[COB["Vendedor"]]), cliente: String(r[COB["Cliente"]]), nota: String(r[COB["Nota"]]),
       nominal: N(r[COB["Cobrado $"]]), abono: N(r[COB["Abono real $"]]), ef: N(r[COB["Efectivo $"]]), us: N(r[COB["USDT $"]]), ze: N(r[COB["Zelle $"]]), bs: N(r[COB["Bs (en $)"]]),
       tasa: N(r[COB["Tasa"]]), ref: String(r[COB["Referencia"]]), estado: String(r[COB["Estado"]]).trim().toLowerCase(), obs: String(r[COB["Observación"]]),
+      tarifa: String(r[COB["Tarifa"]] || ""), dd: N(r[COB["Desc. divisas %"]]), bv: N(r[COB["Abono a la nota $"]]),
       ts: N(r[COB["ts"]]), tag: String(r[COB["tag"]]), notaId: String(r[COB["notaId"]]), uid: String(r[COB["uid"]]), base: J(r[COB["base"]]), pagos: J(r[COB["pagos"]]) });
   }
   return out;

@@ -43,6 +43,12 @@ for k, a, b, que in PARES:
     assert T[k].count(a) == 1, 'no encontré: ' + que
     T[k] = T[k].replace(a, b)
 h, j = T['h'], T['j']
+# Tema: el rojo de marca sirve de fondo (botones), pero como letra sobre negro se lee mal de noche.
+# --red-tx es el rojo para TEXTO: más oscuro de día (contraste 6:1 sobre blanco) y coral claro de noche (6,7:1 sobre la superficie oscura).
+h = h.replace('--red:#D7141E;', '--red:#D7141E;--red-tx:#C0111A;') if '--red-tx:#C0111A' not in h else h
+if '--red-tx:#FF7A73' not in h: h = h.replace('--red:#E3222C;', '--red:#E3222C;--red-tx:#FF7A73;')
+assert h.count('--red-tx:') == 3, 'no encontré los tres bloques de colores del tema'
+h = re.sub(r'(?<![-\w])color:var\(--red\)', 'color:var(--red-tx)', h)
 n = bloque(h, '/*COBRANZAS*/', '/*FIN-COBRANZAS*/', css)
 h = n if n is not None else h.replace('</style>', css.strip() + '\n</style>', 1)
 fin = 'renderLin(); renderBrands(); renderSeg(); renderGrid(); route(); if(EXT) bootVend(); else boot();'

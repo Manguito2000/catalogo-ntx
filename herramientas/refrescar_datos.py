@@ -32,9 +32,12 @@ assert len(precios) > 50 and len(cl) > 50, 'Holded devolvió muy pocos datos; no
 # --- Cobranzas: notas pendientes (y saldadas hace poco) por cliente. Solo lectura de Holded.
 # Cada nota: [id, número, idCliente, fecha, vence, total, pagado, pendiente, tarifa, desc%, saldoReal, saldoBs, [[idPago, monto, fecha]]]
 #   tarifa: 'u' USD, 'l' Lista, 'b' BCV, '?' no se pudo determinar (se deduce comparando los precios de la nota con las tarifas actuales).
-#   saldoReal = lo que falta en dólares reales (lo que cuenta Holded una vez puesto el 15 %). En una nota BCV sin el 15 % todavía: pendiente x 0,85.
-#   saldoBs   = solo notas BCV: lo que falta si se paga en bolívares a tasa BCV (saldoReal / 0,85). En las demás va null.
+#   saldoReal = lo que falta en dólares reales (lo que cuenta Holded una vez puesto el descuento BCV). En una nota BCV sin el descuento todavía: pendiente x (1 - descuento_bcv).
+#   saldoBs   = solo notas BCV: lo que falta en dólares a tasa BCV (lo que ve y cobra el vendedor): pendiente / (1 - desc% de la nota), o el pendiente si aún no tiene descuento. En las demás va null.
 #   Los pagos (id de Holded) permiten a la página confirmar los cobros anotados por el vendedor sin depender del saldo.
+# Descuento BCV: un solo número para todo el sistema, en config.json (raíz del repositorio)
+try: FBCV = 1 - float(json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.json'), encoding='utf-8'))['descuento_bcv']) / 100
+except Exception: FBCV = 0.85
 tar = {}
 for x in prods:
     sku = (x.get('sku') or '').strip(); r = {y['id']: y.get('subtotal') for y in (x.get('rates') or [])}
@@ -55,9 +58,10 @@ for n in notas:
     pen, pag = round(float(n.get('paymentsPending') or 0), 2), [[y.get('id'), round(float(y.get('amount') or 0), 2), y.get('date')] for y in (n.get('paymentsDetail') or [])]
     if pen < 0.01 and not (pag and max(y[2] or 0 for y in pag) >= corte): continue
     t, d = tarifa(n), float(n.get('discount') or 0)
-    real = round(pen * 0.85, 2) if t == 'b' and d == 0 else pen
+    real = round(pen * FBCV, 2) if t == 'b' and d == 0 else pen
+    bcv = (round(pen / (1 - d / 100), 2) if d > 0 else pen) if t == 'b' else None   # lo que falta en dólares a tasa BCV
     nt.setdefault(tagcl.get(n.get('contact'), ''), []).append([n['id'], n['docNumber'], n.get('contact'), n.get('date'), n.get('dueDate') or None,
-        round(float(n.get('total') or 0), 2), round(float(n.get('paymentsTotal') or 0), 2), pen, t, d, real, round(real / 0.85, 2) if t == 'b' else None, pag])
+        round(float(n.get('total') or 0), 2), round(float(n.get('paymentsTotal') or 0), 2), pen, t, d, real, bcv, pag])
 assert len(notas) > 100, 'Holded devolvió muy pocas notas; no se toca datos.json'
 ahora = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'); b64 = lambda b: base64.b64encode(b).decode(); blobs = []
 for v in json.load(open(a.vendedores, encoding='utf-8'))['v']:

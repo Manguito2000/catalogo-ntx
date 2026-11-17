@@ -2,7 +2,7 @@
 .cbs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .cbs>div{background:var(--surface);border-radius:12px;padding:12px 14px;display:grid;gap:3px;align-content:start}
 .cbs b{font-size:32px;line-height:1}
-.cbs .v b{color:var(--red)}
+.cbs .v b{color:var(--red-tx)}
 .cbs small{color:var(--mut);font-weight:600;font-size:12px}
 .cbg{background:var(--surface);border-radius:12px;overflow:hidden}
 .cbh{display:flex;justify-content:space-between;gap:10px;align-items:baseline;padding:12px 14px 8px;border-bottom:2px solid var(--ink)}
@@ -15,7 +15,7 @@
 .cbr small{font-size:12.5px;color:var(--mut);font-weight:600}
 .cbr .r{text-align:right}
 .cbr .pc{color:var(--warn);font-weight:700}
-.ven{color:var(--red);font-weight:800}
+.ven{color:var(--red-tx);font-weight:800}
 .cbf{display:grid;gap:12px}
 .cbf label{display:grid;gap:5px}
 .cbf label[hidden]{display:none}
@@ -25,7 +25,7 @@
 .cbsum div{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 .cbsum .big{font-size:15px;border-top:2px solid var(--ink);padding-top:8px;margin-top:3px}
 .cbsum .big b{font-size:30px;line-height:1}
-.cbe{color:var(--red);font-weight:700;font-size:13px;min-height:0}
+.cbe{color:var(--red-tx);font-weight:700;font-size:13px;min-height:0}
 .cbe:empty{display:none}
 .msg .txt{margin-left:6px}
 .cba{display:grid;gap:4px;padding-block:10px;border-bottom:1px solid var(--line)}
@@ -50,4 +50,8 @@ body.con-nav .pg{padding-bottom:110px}
 body.tecl .nav{display:none}
 /* puesta de sol: el movimiento lo pone el script directamente sobre cada barra */
 header.top,.nav,.bar{will-change:transform}
+.cbr .tb,.sel .tb{display:block;font-size:11.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.cbf label>span.pct{display:flex;align-items:center;justify-content:flex-start;gap:8px}
+.pct .fld{max-width:110px}
+.pct b{font-size:18px}
 /*FIN-COBRANZAS*/

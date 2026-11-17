@@ -32,3 +32,10 @@ El receptor devuelve en cada cobro `pg` (ids de los pagos de Holded con que se c
 - `refrescar_datos.py`: arma `nt`. · `conciliar.js` + `conciliar_pruebas.js`: lógica y 14 casos (`node herramientas/conciliar_pruebas.js`).
 - `cobranzas_apps_script.gs`: archivo aparte del proyecto de Apps Script (hoja "Cobranzas NTX", conciliación cada hora, solo lee Holded). Incluye una copia de conciliar.js: si se cambia uno, cambiar el otro.
 - `receptor_apps_script.gs`: una línea nueva en doGet que enruta cobro/cobros/anular.
+
+## Notas BCV y descuento BCV (nov 2026, regla de Mango)
+- El vendedor ve y cobra las notas BCV en **dólares a tasa BCV** (`nt[11]`): sin factores ni calculadora. La conversión a dólares reales es de administración.
+- Pago en bolívares de una nota BCV: abona 1 a 1 en dólares BCV. Pago en divisas: se abre el campo "Descuento por pago en divisas" (por defecto el descuento BCV; el vendedor puede poner otro): abona divisas / (1 − desc).
+- Cada cobro lleva `bv` (abono en dólares de la nota), `dd` (descuento aplicado a divisas) y `tb` ("b" si la nota es BCV); `ab` sigue siendo dólares reales (bolívares × factor BCV + divisas) para conciliar con los pagos de Holded.
+- **El descuento BCV es un solo número, en `config.json` (raíz del repo, `descuento_bcv`).** Lo leen el portal, `refrescar_datos.py` y el receptor (vía GitHub Pages, caché 10 min). Para cambiarlo: editar ese número, rearmar el portal y publicar. Nada más.
+- Colores: `--red-tx` es el rojo para texto (más oscuro de día, coral de noche); `--red` queda solo para fondos y bordes.
