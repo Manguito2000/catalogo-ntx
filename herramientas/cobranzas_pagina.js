@@ -270,7 +270,7 @@ function cbImg(c){
 }
 async function cbShare(id){
   const c = cbCobros().find(x => x.id === id); if(!c || !c.rec) return; const txt = cbReciboTxt(c);
-  try{ const blob = CB.img[c.id] || await cbImg(c); CB.img[c.id] = blob; await navigator.share({ files:[new File([blob], "Recibo " + c.rec + ".png", { type:"image/png" })], text:txt }); }
+  try{ const blob = CB.img[c.id] || await cbImg(c); CB.img[c.id] = blob; await navigator.share({ files:[new File([blob], "Recibo " + c.rec + ".png", { type:"image/png" })], text:"Recibo " + c.rec + " · Nota " + (c.nn || "") });   // con la imagen basta el número de recibo y de nota, para encontrarlo luego con el buscador }
   catch(e){ if(e && e.name === "AbortError") return; CB.avisos.push("Este teléfono no dejó compartir la imagen. Usa «Enviar solo el texto por WhatsApp»."); cobRender(); }
 }
 
@@ -334,8 +334,11 @@ function solPinta(){
   n.style.transform = v ? "translate3d(0," + (v * nh).toFixed(2) + "px,0)" : ""; b.style.transform = v && !n.hidden ? "translate3d(0," + (v * nh).toFixed(2) + "px,0)" : "";
 }
 function solAnda(){
-  if(SOL.a) return; SOL.a = true;
-  const paso = () => { const d = SOL.f - SOL.v; if(Math.abs(d) < 0.002){ SOL.v = SOL.f; solPinta(); SOL.a = false; return; } SOL.v += d * 0.16; solPinta(); requestAnimationFrame(paso); };
+  if(SOL.a) return; SOL.a = true; let t0 = 0;
+  /* suavizado por tiempo (no por cuadro): igual de fluido en pantallas de 60 y de 120 cuadros por segundo */
+  const paso = t => { const dt = t0 ? Math.min(50, t - t0) : 16; t0 = t; const d = SOL.f - SOL.v;
+    if(Math.abs(d) < 0.0015){ SOL.v = SOL.f; solPinta(); SOL.a = false; return; }
+    SOL.v += d * (1 - Math.exp(-dt / 230)); solPinta(); requestAnimationFrame(paso); };
   requestAnimationFrame(paso);
 }
 function solCero(){ SOL.f = 0; SOL.y = Math.max(0, window.scrollY); solAnda(); }
