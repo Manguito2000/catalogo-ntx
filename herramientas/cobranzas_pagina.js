@@ -192,7 +192,7 @@ function cbMerge(c){ CB.cobros = [c].concat((CB.cobros || []).filter(x => x.id !
 /* devuelve {ok, cobro} | {err} (el servidor lo rechazó) | {net:true} (sin conexión) */
 async function cbEnviar(o){
   let r;
-  try{ r = await cbSrv("cobro", { c:cbB64({ id:o.id, rec:o.rec || "", n:o.n, ef:o.ef, us:o.us, ze:o.ze, bs:o.bs, ab:o.ab, ta:o.ta || 0, rf:o.rf || "", cn:o.cn }) }); }catch(e){ return { net:true }; }
+  try{ r = await cbSrv("cobro", { x:cbB64({ id:o.id, rec:o.rec || "", n:o.n, ef:o.ef, us:o.us, ze:o.ze, bs:o.bs, ab:o.ab, ta:o.ta || 0, rf:o.rf || "", cn:o.cn }) }); }catch(e){ return { net:true }; }
   if(r && r.estado === "ok" && r.cobro) return { ok:true, cobro:r.cobro };
   if(r && r.estado === "no") return { err:"Este dispositivo ya no está autorizado. Habla con administración." };
   return { err:(r && r.msg) || "No se pudo guardar el cobro." };

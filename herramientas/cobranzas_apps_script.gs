@@ -1,7 +1,7 @@
 // COBRANZAS del portal de ventas NTX. Archivo aparte dentro del mismo proyecto de Apps Script del receptor (usa sus funciones y VENDEDORES).
 // No contiene secretos: la clave de Holded va en Configuración del proyecto › Propiedades de la secuencia de comandos (HOLDED_KEY).
 // Qué hace:
-//   ?a=cobro   el vendedor anota un cobro (el receptor le da número de recibo y guarda qué pagos tenía la nota en Holded en ese momento)
+//   ?a=cobro&x=…   el vendedor anota un cobro (el receptor le da número de recibo y guarda qué pagos tenía la nota en Holded en ese momento)
 //   ?a=cobros  devuelve al vendedor sus cobros (por entregar / por confirmar / confirmados recientes)
 //   ?a=anular  el vendedor anula un cobro suyo que aún no esté confirmado
 //   conciliarCobros()  corre sola cada hora: mira Holded (solo lectura) y confirma los cobros cuyos pagos ya registró administración
@@ -31,7 +31,7 @@ function vendedorDe(q) {
   return st.bloq || !buscar(st.disp, disp) ? null : tag;
 }
 function cobroNuevo(tag, q) {
-  var c, b64 = String(q.c || "");
+  var c, b64 = String(q.x || "");   // el cobro llega en "x": Google reserva los nombres "c" y "sid" y rechaza la petición si se usan
   if (!/^[A-Za-z0-9_-]{20,3000}$/.test(b64)) return { estado: "error", msg: "Cobro incompleto" };
   while (b64.length % 4) b64 += "=";
   try { c = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(b64)).getDataAsString("UTF-8")); } catch (e) { return { estado: "error", msg: "No se pudo leer el cobro" }; }

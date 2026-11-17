@@ -21,7 +21,7 @@ El receptor devuelve en cada cobro `pg` (ids de los pagos de Holded con que se c
 - Entrada: pestaña inferior "Catálogo | Cobranzas". Pantallas: Pendientes (por cliente, total por cobrar y vencido) · Registrar cobro · Por entregar (total en efectivo).
 
 ## Receptor (mismo /exec que los pedidos; GET; responde JSON). Siempre con `cod` (código del vendedor) y `d` (id del dispositivo), igual que `a=entrar`.
-- `a=cobro&c=<base64url de JSON>` con `{id (uuid generado en el teléfono, ≥8 caracteres), n (id de la nota), ef, us, ze, bs (montos en $), ab (abono real), ta (tasa, opcional), rf (referencia, opcional)}`
+- `a=cobro&x=<base64url de JSON>` (nunca usar parámetros llamados `c` o `sid`: Google Apps Script los reserva y responde un error sin llegar al script) con `{id (uuid generado en el teléfono, ≥8 caracteres), n (id de la nota), ef, us, ze, bs (montos en $), ab (abono real), ta (tasa, opcional), rf (referencia, opcional)}`
   → `{estado:"ok", cobro:{rec:"G-0001", id, n, nn, cn, t, nom, ab, ef, us, ze, bs, ta, rf, est, obs}}`. Reenviar el mismo `id` no duplica (`repetido:true`).
   Errores → `{estado:"error", msg}` (mostrar msg tal cual). `{estado:"no"}` = dispositivo o código no autorizado.
   Sin conexión: guardar en el teléfono y reenviar con el mismo `id`; el número de recibo lo da el receptor.
