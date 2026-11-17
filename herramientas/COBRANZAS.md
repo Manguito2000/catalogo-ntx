@@ -39,3 +39,15 @@ El receptor devuelve en cada cobro `pg` (ids de los pagos de Holded con que se c
 - Cada cobro lleva `bv` (abono en dólares de la nota), `dd` (descuento aplicado a divisas) y `tb` ("b" si la nota es BCV); `ab` sigue siendo dólares reales (bolívares × factor BCV + divisas) para conciliar con los pagos de Holded.
 - **El descuento BCV es un solo número, en `config.json` (raíz del repo, `descuento_bcv`).** Lo leen el portal, `refrescar_datos.py` y el receptor (vía GitHub Pages, caché 10 min). Para cambiarlo: editar ese número, rearmar el portal y publicar. Nada más.
 - Colores: `--red-tx` es el rojo para texto (más oscuro de día, coral de noche); `--red` queda solo para fondos y bordes.
+
+## Facturas AdriMan (nov 2026) — parte 1 lista: datos y receptor
+- **Vínculo nota → factura**: al emitir la factura fiscal real, Claude etiqueta la nota en Holded con `fac000004` (y `iva1213` = IVA en centavos de dólares de la nota).
+  `PUT documents/invoice/<id>` con `{"tags": [...las que tenía, "fac…", "iva…"], "discount": <el mismo de la nota>}`. **Ojo: un PUT sin `discount` lo pone en 0** (probado en NE4244; se restauró). Releer y comparar después.
+- `datos.json` → `nt[13]` = `[número, iva|null]` o `null`. `a=cobros` devuelve además `nt[id][5]` (lo mismo, en vivo), `sol` (solicitudes del vendedor) y `ret` (retención por nota).
+- Monto: el saldo de siempre es el **neto**. El IVA es solo informativo para el vendedor (16 % de la base; si viene la etiqueta iva se usa esa).
+- Rutas nuevas (GET, con `cod` y `d`): `solfac&x={n, cm}` · `solcancel&r=<id>` · `ret&x={n, rt: 0|75|100, cp: ""|whatsapp|fisico|adjunto}`.
+  POST (texto JSON) `{a:"ret", cod, d, x:{n, rt}, nombre, tipo, b64}` sube el comprobante (foto o PDF ≤ 9 MB) a Drive, carpeta "Retenciones NTX".
+- Bandeja de Mango (Pedidos NTX): `a=adm&k=ADMIN` → `{sol, ret}`; `a=admacc&k=ADMIN&s=<id>&e=pendiente|descartada` o `&r=<idNota>&e=recibido|pendiente`.
+  Las solicitudes pasan solas a "emitida" en la conciliación de cada hora cuando la nota ya tiene la etiqueta fac. No se envía ningún correo.
+- Hojas nuevas en "Cobranzas NTX": "Solicitudes factura" y "Retenciones". En "Cobros", columna nueva "Factura".
+- En el receptor, doGet enruta con `if (esCobranzas(q.a)) return json(cobranzas(q));`.
