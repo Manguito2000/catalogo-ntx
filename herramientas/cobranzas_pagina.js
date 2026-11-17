@@ -315,4 +315,11 @@ $("nav").addEventListener("click", e => {
 window.addEventListener("online", () => { cbLoad(); cbFlush().then(() => { if(VISTA === "cobros") cobRender(); cobBadge(); }); });
 /* cobros guardados sin conexión: se intentan enviar al abrir el portal, sin esperar a que entren a Cobros */
 setTimeout(() => { cbLoad(); if(CB.cola.length) cbFlush().then(cobBadge); }, 5000);
+/* iPhone: al cerrarse el teclado, la pantalla puede quedar "corrida" y las barras fijas flotan a media pantalla.
+   Mientras se escribe se oculta la barra inferior; al terminar se le da un empujón mínimo al scroll para que el teléfono recoloque todo. */
+{ const esCampo = el => !!(el && el.matches && el.matches("input,textarea,select"));
+  const recoloca = () => { if(esCampo(document.activeElement)) return; const y = window.scrollY; window.scrollTo(window.scrollX, y + 1); window.scrollTo(window.scrollX, y); };
+  document.addEventListener("focusin", e => { if(esCampo(e.target) && e.target.type !== "checkbox") document.body.classList.add("tecl"); });
+  document.addEventListener("focusout", () => { setTimeout(() => { if(!esCampo(document.activeElement)){ document.body.classList.remove("tecl"); recoloca(); setTimeout(recoloca, 300); } }, 80); });
+  if(window.visualViewport) window.visualViewport.addEventListener("resize", () => setTimeout(recoloca, 60)); }
 /*FIN-COBRANZAS*/

@@ -47,4 +47,5 @@ a.send{display:block;text-align:center;text-decoration:none}
 body.con-nav .bar{bottom:calc(56px + env(safe-area-inset-bottom,0px));padding-bottom:0}
 body.con-nav .grid{padding-bottom:180px}
 body.con-nav .pg{padding-bottom:110px}
+body.tecl .nav{display:none}
 /*FIN-COBRANZAS*/
