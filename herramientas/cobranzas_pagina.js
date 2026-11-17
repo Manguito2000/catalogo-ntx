@@ -42,6 +42,7 @@ function cobBadge(){
 /* barra inferior del portal: PEDIDOS | COBRANZAS. Es el único sitio desde donde se cambia de ambiente. */
 function cobNav(v){
   const on = EXT && S.rol === "vendedor", c = v === "cobros"; $("nav").hidden = !on; document.body.classList.toggle("con-nav", on);
+  if(v !== "catalogo") solCero();
   $("navCob").setAttribute("aria-current", c ? "page" : "false"); $("navPed").setAttribute("aria-current", c ? "false" : "page");
 }
 const cbF0 = () => ({ ef:"", us:"", ze:"", bs:"", ta:"", rf:"" });
@@ -322,4 +323,17 @@ setTimeout(() => { cbLoad(); if(CB.cola.length) cbFlush().then(cobBadge); }, 500
   document.addEventListener("focusin", e => { if(esCampo(e.target) && e.target.type !== "checkbox") document.body.classList.add("tecl"); });
   document.addEventListener("focusout", () => { setTimeout(() => { if(!esCampo(document.activeElement)){ document.body.classList.remove("tecl"); recoloca(); setTimeout(recoloca, 300); } }, 80); });
   if(window.visualViewport) window.visualViewport.addEventListener("resize", () => setTimeout(recoloca, 60)); }
+/* "Puesta de sol": en el catálogo, al deslizar hacia abajo la banda de arriba y la barra de abajo se retiran poco a poco hacia sus bordes
+   (acompañan al dedo, no saltan); al deslizar hacia arriba regresan igual de suave, un poco más rápido. La barra roja del pedido baja al borde y sigue visible. */
+const SOL = { f:0, y:0, t:false };
+function solPinta(){ const st = document.body.style; st.setProperty("--sol", SOL.f.toFixed(3)); st.setProperty("--solb", Math.round(SOL.f * ($("nav").offsetHeight || 0)) + "px"); }
+function solCero(){ SOL.f = 0; SOL.y = Math.max(0, window.scrollY); solPinta(); }
+window.addEventListener("scroll", () => { if(SOL.t) return; SOL.t = true; requestAnimationFrame(() => { SOL.t = false;
+  const y = Math.max(0, window.scrollY), max = document.documentElement.scrollHeight - window.innerHeight; let d = y - SOL.y; SOL.y = y;
+  if((VISTA || "catalogo") !== "catalogo" || document.body.classList.contains("tecl") || y < 12){ if(SOL.f){ SOL.f = 0; solPinta(); } return; }
+  if(y > max - 2 || !d) return;                       // rebote del final de la página en iPhone
+  d = Math.max(-90, Math.min(90, d));                 // un salto programado no las esconde de golpe
+  const f = Math.max(0, Math.min(1, SOL.f + (d > 0 ? d / 420 : d / 200)));
+  if(f !== SOL.f){ SOL.f = f; solPinta(); } }); }, { passive:true });
+document.addEventListener("focusin", solCero);
 /*FIN-COBRANZAS*/
