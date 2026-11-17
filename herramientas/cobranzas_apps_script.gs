@@ -17,7 +17,8 @@ function cobranzas(q) {
     if (!tag) return { estado: "no", msg: "Dispositivo o código no autorizado" };
     if (q.a === "cobro") return cobroNuevo(tag, q);
     if (q.a === "anular") return cobroAnular(tag, q);
-    return { estado: "ok", cobros: cobrosDe(tag) };
+    var vivo = null; try { vivo = saldosVivos(q.ids); } catch (e2) {}          // si Holded falla, los cobros se devuelven igual
+    return { estado: "ok", cobros: cobrosDe(tag), nt: vivo };
   } catch (err) { return { estado: "error", msg: String(err && err.message || err) }; }
 }
 // Mismo control que el portero: código correcto, vendedor no bloqueado y dispositivo ya aprobado.
@@ -87,6 +88,32 @@ function cobrosDe(tag) {
   return leerCobros(hojaCobros()).filter(function (f) { return f.tag === tag && (f.estado === "cobrado" || f.estado === "revisar" || f.ts >= corte); }).map(vista);
 }
 function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos }; }
+
+/* Saldos al momento: el teléfono manda los ids de las notas que tiene (?ids=a,b,c) y recibe cómo están AHORA en Holded:
+   { id: [total, pagado, pendiente, descuento %, [[idPago, monto, fecha]]] }. Así una nota cobrada en administración deja de salirle
+   como pendiente al vendedor sin esperar al refresco de datos. Se guarda un minuto en memoria para no llamar a Holded en cada toque. */
+function saldosVivos(ids) {
+  var pedidos = String(ids || "").split(",").filter(function (x) { return /^[a-f0-9]{24}$/.test(x); }).slice(0, 80);
+  if (!pedidos.length) return {};
+  var cache = CacheService.getScriptCache(), raw = cache.get("COB_NT"), mapa;
+  if (raw) mapa = JSON.parse(raw);
+  else {
+    mapa = {};
+    for (var p = 1; p <= 6; p++) {
+      var docs = holded("documents/invoice?page=" + p); if (!docs.length) break;
+      docs.forEach(function (d) {
+        var pagos = (d.paymentsDetail || []).map(function (y) { return [y.id, Math.round(Number(y.amount) * 100) / 100, y.date]; });
+        var hace = Date.now() / 1000 - 30 * 86400, reciente = pagos.some(function (y) { return y[2] >= hace; });
+        if ((Number(d.paymentsPending) || 0) >= 0.01 || reciente) mapa[d.id] = [Number(d.total) || 0, Number(d.paymentsTotal) || 0, Number(d.paymentsPending) || 0, Number(d.discount) || 0, pagos];
+      });
+      if (docs.length < 500) break;
+    }
+    try { cache.put("COB_NT", JSON.stringify(mapa), 60); } catch (e) {}
+  }
+  var out = {};
+  pedidos.forEach(function (id) { out[id] = mapa[id] || null; });   // null = Holded ya no la tiene como pendiente ni pagada hace poco
+  return out;
+}
 
 /* ---------- conciliación automática (reloj de cada hora) ---------- */
 function conciliarCobros() {

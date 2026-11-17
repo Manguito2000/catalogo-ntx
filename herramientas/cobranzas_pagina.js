@@ -89,7 +89,7 @@ function cbPendHtml(){
         <span class="r"><span class="s bs num">${money(x.saldo)}</span>${x.n.tar === "b" && x.saldo >= 0.01 ? `<br><small>En Bs: ${money(x.saldo / FACT)}</small>` : ""}${x.pc >= 0.01 ? `<br><small class="pc">Abono por confirmar ${money(x.pc)}</small>` : ""}</span></button>`;
     }).join("") + `</section>`;
   });
-  return h + `<p class="hint">Saldos de Holded al ${S.fecha ? esc(new Date(S.fecha).toLocaleString("es-VE", { day:"2-digit", month:"short", hour:"numeric", minute:"2-digit" })) : "último refresco"}${CB.sync ? " · " + esc(CB.sync) : ""}. Lo que cobres hoy aparece como «abono por confirmar» hasta que administración lo registre.</p>`;
+  return h + `<p class="hint">${CB.vivo ? "Saldos de Holded al momento" : "Saldos de Holded al " + (S.fecha ? esc(new Date(S.fecha).toLocaleString("es-VE", { day:"2-digit", month:"short", hour:"numeric", minute:"2-digit" })) : "último refresco")}${CB.sync ? " · " + esc(CB.sync) : ""}. Lo que cobres hoy aparece como «abono por confirmar» hasta que administración lo registre.</p>`;
 }
 function cbMetodos(c){ return [["Efectivo", c.ef], ["USDT", c.us], ["Zelle", c.ze], ["Bs", c.bs]].filter(x => x[1] > 0).map(x => x[0] + " " + money(x[1])).join(" · "); }
 function cbEntHtml(){
@@ -212,7 +212,8 @@ async function cbFlush(){
 async function cbRefresca(){
   CB.sync = "";
   await cbFlush();
-  try{ const r = await cbSrv("cobros"); if(r && r.estado === "ok" && Array.isArray(r.cobros)){ CB.cobros = r.cobros; cbSave(); } else if(r && r.estado === "no") CB.sync = "este dispositivo no está autorizado para cobros"; }
+  try{ const ids = (S.nt || []).map(x => x[0]).slice(0, 80).join(",");
+    const r = await cbSrv("cobros", ids ? { ids } : {}); if(r && r.estado === "ok" && Array.isArray(r.cobros)){ CB.cobros = r.cobros; cbSave(); cbVivo(r.nt); } else if(r && r.estado === "no") CB.sync = "este dispositivo no está autorizado para cobros"; }
   catch(e){ CB.sync = "sin conexión: se muestra lo último guardado"; }
   if(Date.now() - CB.t0 > 3e5){
     CB.t0 = Date.now();
@@ -220,6 +221,15 @@ async function cbRefresca(){
   }
   if(VISTA === "cobros" && !CB.nota && !CB.ok && !document.activeElement.matches("input")) cobRender();
   cobBadge();
+}
+/* saldos al momento que devuelve el receptor: pisan los del último refresco de datos (que puede tener horas) */
+function cbVivo(m){
+  if(!m || !Array.isArray(S.nt)) return;
+  S.nt.forEach(r => { const v = m[r[0]]; if(v === undefined) return;
+    if(v === null){ if(r[7] >= 0.01){ r[6] = r[5]; r[7] = 0; r[10] = 0; r[11] = r[8] === "b" ? 0 : null; } return; }   // Holded ya no la tiene pendiente
+    r[5] = v[0]; r[6] = v[1]; r[7] = v[2]; r[9] = v[3]; r[12] = v[4] || [];
+    r[10] = r[8] === "b" && v[3] === 0 ? r2(v[2] * FACT) : v[2]; r[11] = r[8] === "b" ? r2(r[10] / FACT) : null; });
+  CB.vivo = Date.now();
 }
 function cobAbre(){ cbLoad(); CB.nota = null; CB.edit = null; CB.rec = null; CB.ok = null; CB.del = null; CB.tab = CB.tab || "pend"; cobRender(); cobBadge(); cbRefresca(); }
 

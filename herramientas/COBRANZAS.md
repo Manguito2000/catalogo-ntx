@@ -25,7 +25,7 @@ El receptor devuelve en cada cobro `pg` (ids de los pagos de Holded con que se c
   → `{estado:"ok", cobro:{rec:"G-0001", id, n, nn, cn, t, nom, ab, ef, us, ze, bs, ta, rf, est, obs}}`. Reenviar el mismo `id` no duplica (`repetido:true`).
   Errores → `{estado:"error", msg}` (mostrar msg tal cual). `{estado:"no"}` = dispositivo o código no autorizado.
   Sin conexión: guardar en el teléfono y reenviar con el mismo `id`; el número de recibo lo da el receptor.
-- `a=cobros` → `{estado:"ok", cobros:[...]}`: los pendientes y los confirmados/anulados de los últimos 7 días. `est`: cobrado | revisar | confirmado | anulado ("revisar" se muestra al vendedor como por confirmar).
+- `a=cobros&ids=<ids de notas separados por coma>` → `{estado:"ok", cobros:[...], nt:{id:[total,pagado,pendiente,desc%,pagos]|null}}` (`nt` = saldos de Holded al momento; la página los aplica con `cbVivo`): los pendientes y los confirmados/anulados de los últimos 7 días. `est`: cobrado | revisar | confirmado | anulado ("revisar" se muestra al vendedor como por confirmar).
 - `a=anular&r=G-0001` → anula un cobro propio no confirmado; devuelve la lista actualizada.
 
 ## Archivos
