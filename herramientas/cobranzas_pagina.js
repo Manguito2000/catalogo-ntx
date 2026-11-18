@@ -344,7 +344,7 @@ function cbFilaAcc(n, saldo){
     return `<div class="cbx"><small>IVA aparte: <b class="num">${cbM(ip.iva, n)}</b>${rt ? " · retiene " + rt + " %" : ""}</small><button class="mini" data-cb="open" data-id="${esc(n.id)}">${rt ? "Retención" : "IVA y retención"}</button></div>`; }
   if(s) return `<div class="cbx"><span class="st low">Factura solicitada</span><button class="mini" data-cb="facnew" data-id="${esc(n.id)}">Ver o cambiar</button></div>`;
   if(!esB(n)) return "";   // la factura legal solo se pide para notas emitidas en BCV
-  return `<div class="cbx"><small>Sin factura legal</small><button class="mini" data-cb="facnew" data-id="${esc(n.id)}">Pedir factura legal</button></div>`;
+  return `<div class="cbx"><small>Sin factura legal</small><button class="mini" data-cb="facnew" data-id="${esc(n.id)}">Solicitar factura</button></div>`;
 }
 /* en la pantalla de la nota: pedir la factura, o (ya facturada) IVA aparte, retención y comprobante */
 function cbFacBox(n, x){
@@ -354,7 +354,7 @@ function cbFacBox(n, x){
     return `<div class="box"><span class="lbl">Factura legal</span>` + (s
       ? `<div class="sel"><span><b>Factura solicitada</b><small>${esc(cbHora(s.t))}${s.cm ? " · " + esc(s.cm.slice(0, 80)) + (s.cm.length > 80 ? "…" : "") : ""}</small></span></div>
         <div class="f cbfa"><button class="txt" data-cb="facnew" data-id="${esc(n.id)}">Cambiar comentarios</button><button class="txt" data-cb="faccancel" data-id="${esc(s.id)}">Cancelar solicitud</button></div>`
-      : `<p class="hint">Si el cliente necesita factura con IVA, pídela aquí. Con la factura, el monto de esta nota se entiende como neto y el IVA lo paga el cliente aparte.</p><button class="ghost" data-cb="facnew" data-id="${esc(n.id)}">PEDIR FACTURA LEGAL</button>`) + `</div>`;
+      : `<p class="hint">Si el cliente necesita factura con IVA, solicítala aquí. Con la factura, el monto de esta nota se entiende como neto y el IVA lo paga el cliente aparte.</p><button class="ghost" data-cb="facnew" data-id="${esc(n.id)}">SOLICITAR FACTURA</button>`) + `</div>`;
   }
   const rr = cbRet(n) || {}, rt = rr.rt || 0, ip = cbIvaDe(n, x.saldo), cp = rt ? rr.cp || "" : "", chip = (k, l, cur, at) => `<button data-cb="${at}" data-id="${esc(n.id)}" data-k="${k}" aria-pressed="${cur === k}">${l}</button>`;
   return `<div class="box"><span class="lbl">Factura AdriMan ${esc(n.fac[0])}</span>
