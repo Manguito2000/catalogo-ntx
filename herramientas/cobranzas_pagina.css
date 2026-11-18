@@ -56,6 +56,8 @@ body.con-nav .bar{bottom:calc(56px + env(safe-area-inset-bottom,0px));padding-bo
 body.con-nav .grid{padding-bottom:180px}
 body.con-nav .pg{padding-bottom:110px}
 body.tecl .nav{display:none}
+/* con la barra de secciones oculta (teclado), la barra roja del pedido baja a su sitio en el borde: no queda flotando en el hueco */
+body.con-nav.tecl .bar{bottom:0;padding-bottom:env(safe-area-inset-bottom,0px)}
 /* puesta de sol: el movimiento lo pone el script directamente sobre cada barra */
 header.top,.nav,.bar{will-change:transform}
 .cbr .tb,.sel .tb{display:block;font-size:11.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}

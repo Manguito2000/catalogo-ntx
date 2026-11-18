@@ -562,7 +562,17 @@ setTimeout(() => { cbLoad(); if(CB.cola.length) cbFlush().then(cobBadge); }, 500
   const recoloca = () => { if(esCampo(document.activeElement)) return; const y = window.scrollY; window.scrollTo(window.scrollX, y + 1); window.scrollTo(window.scrollX, y); };
   document.addEventListener("focusin", e => { if(esCampo(e.target) && e.target.type !== "checkbox") document.body.classList.add("tecl"); });
   document.addEventListener("focusout", () => { setTimeout(() => { if(!esCampo(document.activeElement)){ document.body.classList.remove("tecl"); recoloca(); setTimeout(recoloca, 300); } }, 80); });
-  if(window.visualViewport) window.visualViewport.addEventListener("resize", () => setTimeout(recoloca, 60)); }
+  /* el iPhone a veces cierra el teclado sin quitar el foco del campo: entonces el modo "escribiendo" quedaba pegado y las barras fuera de sitio.
+     Si el teclado ya no ocupa la pantalla (o se hace scroll sin teclado), se sale de ese modo, se suelta el campo y se recoloca todo. */
+  const vv = window.visualViewport, tactil = window.matchMedia && matchMedia("(pointer:coarse)").matches; let altoMax = vv ? vv.height : 0;
+  let tFoco = 0; document.addEventListener("focusin", () => { tFoco = Date.now(); });   // el teclado tarda en abrir: no se juzga en ese lapso
+  window.addEventListener("orientationchange", () => { altoMax = 0; });
+  const tecladoAbierto = () => { if(!vv) return true; altoMax = Math.max(altoMax, vv.height); return vv.height < altoMax - 150; };
+  const sueltaSiCerrado = () => { if(!tactil || !document.body.classList.contains("tecl") || Date.now() - tFoco < 900 || tecladoAbierto()) return;
+    const a = document.activeElement; if(esCampo(a)) a.blur();
+    document.body.classList.remove("tecl"); recoloca(); setTimeout(recoloca, 300); };
+  if(vv) vv.addEventListener("resize", () => setTimeout(() => { recoloca(); sueltaSiCerrado(); }, 120));
+  window.addEventListener("scroll", () => { if(document.body.classList.contains("tecl")) sueltaSiCerrado(); }, { passive:true }); }
 /* "Puesta de sol": en el catálogo, al deslizar hacia abajo la banda de arriba y la barra de abajo se retiran poco a poco hacia sus bordes
    (acompañan al dedo, no saltan); al deslizar hacia arriba regresan igual de suave, un poco más rápido. La barra roja del pedido baja al borde y sigue visible. */
 const SOL = { f:0, v:0, y:0, t:false, a:false };
