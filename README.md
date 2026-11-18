@@ -9,5 +9,6 @@ Catálogo de motores, aspas, bobinas, carboneras, conectores y relays NTX para v
 
 ## Herramientas
 - `herramientas/refrescar_datos.py`: refresca `datos.json` desde Holded (tarea automática).
+- `herramientas/aplicar_jalar.py`: agrega «jalar para actualizar» (se aplica sobre el plano antes de armar).
 - `herramientas/portal.py`: abre `index.html` para editar el catálogo y lo vuelve a armar cifrado.
 - `herramientas/receptor_apps_script.gs`: plantilla del receptor (pedidos, portero de dispositivos y panel). Los valores secretos no están en este repositorio.
