@@ -343,12 +343,14 @@ function cbFilaAcc(n, saldo){
   if(n.fac){ const ip = cbIvaDe(n, saldo), rt = ip.rt;
     return `<div class="cbx"><small>IVA aparte: <b class="num">${cbM(ip.iva, n)}</b>${rt ? " · retiene " + rt + " %" : ""}</small><button class="mini" data-cb="open" data-id="${esc(n.id)}">${rt ? "Retención" : "IVA y retención"}</button></div>`; }
   if(s) return `<div class="cbx"><span class="st low">Factura solicitada</span><button class="mini" data-cb="facnew" data-id="${esc(n.id)}">Ver o cambiar</button></div>`;
+  if(!esB(n)) return "";   // la factura legal solo se pide para notas emitidas en BCV
   return `<div class="cbx"><small>Sin factura legal</small><button class="mini" data-cb="facnew" data-id="${esc(n.id)}">Pedir factura legal</button></div>`;
 }
 /* en la pantalla de la nota: pedir la factura, o (ya facturada) IVA aparte, retención y comprobante */
 function cbFacBox(n, x){
   const s = cbSolDe(n);
   if(!n.fac){
+    if(!s && !esB(n)) return "";   // la factura legal solo se pide para notas emitidas en BCV
     return `<div class="box"><span class="lbl">Factura legal</span>` + (s
       ? `<div class="sel"><span><b>Factura solicitada</b><small>${esc(cbHora(s.t))}${s.cm ? " · " + esc(s.cm.slice(0, 80)) + (s.cm.length > 80 ? "…" : "") : ""}</small></span></div>
         <div class="f cbfa"><button class="txt" data-cb="facnew" data-id="${esc(n.id)}">Cambiar comentarios</button><button class="txt" data-cb="faccancel" data-id="${esc(s.id)}">Cancelar solicitud</button></div>`
