@@ -1,7 +1,7 @@
 # Pedidos directo a Holded y bandeja de Mango — estado y contrato (nov 2026)
 
 Hecho y probado en seco contra Holded real (Opus): `pedidos_apps_script.gs` (archivo aparte del proyecto de Apps Script del receptor).
-Falta (Sonnet): las pantallas de la bandeja en la pestaña ADMIN del portal.
+Hecho (21 nov 2026): las pantallas de la bandeja en la pestaña ADMIN del portal (`cobranzas_pagina.js/.css`, sección «administración»; abajo, «Pantallas»). La tarea horaria «Procesar pedidos NTX» ya está apagada.
 
 ## Qué cambió
 - El receptor crea el pedido (`salesorder`) o presupuesto (`estimate`) en Holded **en el momento** en que el vendedor envía. Ya no hace falta la tarea horaria «Procesar pedidos NTX» (se apaga cuando Mango confirma la instalación).
@@ -37,7 +37,8 @@ H = { notaId, nota:"NE4262", origen:"SO260032", tipo, cliente, vend, total, fech
 - Fechas de Holded (`fecha` de V y H): medianoche de España; día de calendario = UTC de (ts + 2 h), igual que `cbDia` en cobranzas_pagina.js.
 - Las solicitudes de factura y retenciones siguen en `?a=adm` (cobranzas_apps_script.gs).
 
-## Pantallas que faltan (pestaña ADMIN del portal, solo con el código de Mango)
+## Pantallas (pestaña ADMIN del portal, solo con el código de Mango) — hechas
+Se pintan con `admRender` sobre `vCob` (sin recargar la página). Las acciones Ocultar / Revisado se ven al instante y el receptor confirma después; «Ocultar» ofrece «Deshacer» 6 s (`e=mostrar`). «Jalar para actualizar» también funciona en ADMIN (pide la bandeja con `f=1`). Flujo de armado: `portal.py abrir` → `aplicar_cobranzas.py` → `aplicar_jalar.py` → `portal.py armar`.
 Diseño aprobado por Mango (21 nov 2026):
 - Arriba, tres pestañas: **Pedidos (n) · Presupuestos (n) · Facturas (n)**. Retenciones pasa a ser un filtro (chip) dentro de Facturas.
 - Fila de chips de vendedor: Todos · Elías · Gabriel · Natasha · Nersi · Randy · Yo (Yo = vend vacío o Mango).

@@ -61,12 +61,14 @@ function cobBadge(){
   const b = $("cobN"); if(!b) return; cbLoad();
   const v = cbRows().filter(x => x.d != null && x.d < 0 && x.saldo >= 0.01).length;
   b.hidden = !v; b.textContent = v; cobNav(VISTA || "catalogo");
+  try{ if(S.adm && Date.now() - AD.t > 90000) admCarga(); }catch(e){}   // administración: la bandeja se carga apenas abre sesión
 }
 /* barra inferior del portal: PEDIDOS | COBRANZAS. Es el único sitio desde donde se cambia de ambiente. */
 function cobNav(v){
   const on = EXT && S.rol === "vendedor", c = v === "cobros", ad = on && !!S.adm; $("nav").hidden = !on; document.body.classList.toggle("con-nav", on);
   $("navAdm").hidden = !ad; $("nav").classList.toggle("n3", ad); $("navAdm").setAttribute("aria-current", v === "admin" ? "page" : "false");
   if(v !== "catalogo") solCero();
+  if(v !== "admin"){ try{ admToast(""); }catch(e){} }
   $("navCob").setAttribute("aria-current", c ? "page" : "false"); $("navPed").setAttribute("aria-current", c || v === "admin" ? "false" : "page");
 }
 const cbF0 = () => ({ ef:"", us:"", ze:"", bs:"", ta:"", rf:"", dd:"" });
@@ -440,38 +442,154 @@ async function cbSubir(f){
   cobRender();
 }
 
-/* ---------- administración (solo la ve Mango: la llave viene dentro de sus datos cifrados) ---------- */
-const AD = { sol:[], ret:[], tab:"sol", err:"", msg:"", busy:false, cargado:false };
+/* ---------- administración (solo la ve Mango: la llave viene dentro de sus datos cifrados) ----------
+   Tres pestañas: Pedidos · Presupuestos · Facturas (con Retenciones como filtro). Datos: a=bandeja (pedidos, presupuestos, cola, revisar, hechos)
+   y a=adm (solicitudes de factura y retenciones). Contrato en herramientas/PEDIDOS.md. Nada recarga la página: todo se pinta sobre vCob. */
+const AD = { sol:[], ret:[], ped:[], pre:[], cola:[], rev:[], hechos:[], cfg:{ hechosDias:7, presVence:15 }, ahora:0, recv:0,
+  tab:"ped", sub:"sol", ven:"", err:"", errB:"", busy:false, cargado:false, cargB:false, t:0, gen:0, abre:{}, fold:{}, tt:0 };
 async function admSrv(a, ex){
   const res = await fetch(SCRIPT_URL + "?" + new URLSearchParams(Object.assign({ a, k:S.adm }, ex || {})).toString(), { cache:"no-store", redirect:"follow" });
   return JSON.parse(await res.text());
 }
-function admBadge(){ const b = $("admN"); if(!b) return; const n = AD.sol.filter(q => q.est === "pendiente").length + AD.ret.filter(r => !r.rec).length; b.hidden = !n; b.textContent = n; }
-function admAplica(r){ if(r && r.estado === "ok"){ AD.sol = r.sol || []; AD.ret = r.ret || []; AD.err = ""; AD.cargado = true; return true; } AD.err = (r && r.msg) || "No se pudo leer la bandeja."; return false; }
-async function admCarga(){
-  if(!S.adm) return; try{ admAplica(await admSrv("adm")); }catch(e){ AD.err = "Sin conexión."; }
-  admBadge(); if(VISTA === "admin" && !document.activeElement.matches("input,textarea")) admRender();
+const admNorm = s => String(s == null ? "" : s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+const admEsYo = s => { const n = admNorm(s); return !n || n === "rm" || n.indexOf("mango") === 0; };
+const admVenOk = s => !AD.ven ? true : AD.ven === "__yo" ? admEsYo(s) : admNorm(s) === admNorm(AD.ven);
+const admVenTxt = s => admEsYo(s) ? "Mango" : s;
+function admBadge(){
+  const b = $("admN"); if(!b) return;
+  const stock = AD.hechos.filter(h => !h.ok && !h.visto && /STOCK:/.test(String(h.avisos || ""))).length;
+  const n = AD.ped.length + AD.rev.length + AD.sol.filter(q => q.est === "pendiente").length + AD.ret.filter(r => !r.rec).length + stock;
+  b.hidden = !n; b.textContent = n;
 }
-function admAbre(){ AD.msg = ""; admRender(); admCarga(); }
+function admAplica(r){ if(r && r.estado === "ok"){ AD.sol = r.sol || []; AD.ret = r.ret || []; AD.err = ""; AD.cargado = true; return true; } AD.err = (r && r.msg) || "No se pudo leer la bandeja de facturas."; return false; }
+function admAplicaB(r){
+  if(r && r.estado === "ok"){
+    AD.ped = r.ped || []; AD.pre = r.pre || []; AD.cola = r.cola || []; AD.rev = r.rev || []; AD.hechos = r.hechos || []; AD.cfg = r.cfg || AD.cfg;
+    AD.ahora = r.ahora || Math.floor(Date.now() / 1000); AD.recv = Date.now(); AD.errB = ""; AD.cargB = true; return true;
+  }
+  AD.errB = (r && r.estado === "no") ? "Esta llave de administración ya no es válida." : (r && r.msg) || "No se pudo leer la bandeja de pedidos."; return false;
+}
+const admEscribiendo = () => !!(document.activeElement && document.activeElement.matches && document.activeElement.matches("input,textarea"));
+async function admCarga(forzar){
+  if(!S.adm) return; AD.t = Date.now(); const g = AD.gen;
+  await Promise.all([
+    (async () => { try{ admAplica(await admSrv("adm")); }catch(e){ AD.err = "Sin conexión."; } })(),
+    (async () => { try{ const r = await admSrv("bandeja", forzar ? { f:1 } : null); if(g === AD.gen) admAplicaB(r); }catch(e){ AD.errB = "Sin conexión."; } })()
+  ]);
+  admBadge(); if(VISTA === "admin" && !admEscribiendo()) admRender();
+}
+function admAbre(){ admRender(); admCarga(); }
 async function admAcc(ex, msg){
-  if(AD.busy) return; AD.busy = true; AD.msg = "";
-  try{ if(admAplica(await admSrv("admacc", ex))) AD.msg = msg || ""; }catch(e){ AD.err = "Sin conexión: no se guardó. Intenta de nuevo."; }
+  if(AD.busy) return; AD.busy = true;
+  try{ if(admAplica(await admSrv("admacc", ex))) admToast(msg || ""); }catch(e){ AD.err = "Sin conexión: no se guardó. Intenta de nuevo."; }
   AD.busy = false; admBadge(); admRender();
 }
+/* cambios de la bandeja (ocultar, mostrar, revisado): se ven al instante y el servidor confirma después */
+async function admBac(ex, msg, local, undo){
+  AD.gen++; if(local) local(); admBadge(); admRender(); admToast(msg, undo);
+  try{ const r = await admSrv("bacc", ex); if(!admAplicaB(r)){ await admCarga(true); return; } }
+  catch(e){ AD.errB = "Sin conexión: el cambio no se guardó."; admCarga(true); return; }
+  admBadge(); admRender();
+}
+function admToast(txt, undo){
+  let t = $("admToast");
+  if(!t){ t = document.createElement("div"); t.id = "admToast"; t.setAttribute("role", "status");
+    t.addEventListener("click", e => { const b = e.target.closest("[data-undo]"); if(!b) return; const id = b.dataset.undo; admToast(""); admBac({ h:id, e:"mostrar" }, "Devuelto a la bandeja"); });
+    document.body.appendChild(t); }
+  clearTimeout(AD.tt); if(!txt){ t.className = ""; return; }
+  t.innerHTML = `<span>${esc(txt)}</span>` + (undo ? `<button data-undo="${esc(undo)}">Deshacer</button>` : ""); t.className = "on";
+  AD.tt = setTimeout(() => { t.className = ""; }, undo ? 6000 : 2600);
+}
 function admCopia(txt){
-  const ok = () => { AD.msg = "Copiado: pégalo en el chat con Claude"; admRender(); };
-  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, () => admRender());
-  else { const t = document.createElement("textarea"); t.value = txt; t.style.position = "fixed"; t.style.opacity = "0"; document.body.appendChild(t); t.select(); try{ document.execCommand("copy"); ok(); }catch(e){} t.remove(); }
+  const ok = () => admToast("Copiado: pégalo en el chat con Claude");
+  const viejo = () => { const t = document.createElement("textarea"); t.value = txt; t.style.position = "fixed"; t.style.opacity = "0"; document.body.appendChild(t); t.select(); try{ document.execCommand("copy"); ok(); }catch(e){} t.remove(); };
+  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, viejo); else viejo();
 }
 const admTxt = q => "Factura fiscal " + q.nn + "\nCliente: " + q.cn + "\nVendedor: " + q.ven + (q.cm ? "\nInstrucciones del vendedor: " + q.cm : "\nSin instrucciones adicionales del vendedor.");
-function admRender(){
-  const el = $("vCob"); if(!el) return;
-  if(!S.adm){ el.innerHTML = `<div class="box"><p class="hint">Esta sección es solo de administración.</p></div>`; return; }
-  const ps = AD.sol.filter(q => q.est === "pendiente"), hs = AD.sol.filter(q => q.est !== "pendiente"), pr = AD.ret.filter(r => !r.rec), rr = AD.ret.filter(r => r.rec);
-  const tabs = `<div class="seg tabs" role="group" aria-label="Administración">${[["sol", "Facturas" + (ps.length ? " (" + ps.length + ")" : "")], ["ret", "Retenciones" + (pr.length ? " (" + pr.length + ")" : "")]].map(([k, l]) => `<button data-ad="tab" data-k="${k}" aria-pressed="${AD.tab === k}">${l}</button>`).join("")}</div>`;
-  const top = (AD.err ? `<div class="msg">${esc(AD.err)}</div>` : "") + (AD.msg ? `<div class="okb"><b>${esc(AD.msg)}</b></div>` : "");
-  let h = tabs + top;
-  if(AD.tab === "sol"){
+const ADM_VEND = ["Elías", "Gabriel", "Natasha", "Nersi", "Randy"];
+const ADM_SVG = {
+  ok:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  pr:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4L2.8 20h18.4L12 4z"/><path d="M12 10v4.5M12 17.4v.1"/></svg>',
+  cv:'<svg class="cv" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>'
+};
+const admAnt = d => d <= 0 ? "hoy" : d === 1 ? "ayer" : "hace " + d + " días";
+const admAgCl = d => d > 2 ? "ag2" : d >= 1 ? "ag1" : "";
+const admAhora = () => (AD.ahora || Math.floor(Date.now() / 1000)) + Math.floor((Date.now() - (AD.recv || Date.now())) / 1000);
+function admHace(ts){
+  const m = Math.max(0, Math.round((admAhora() - ts) / 60));
+  return m < 1 ? "ahora mismo" : m < 60 ? "hace " + m + " min" : m < 1440 ? "hace " + Math.round(m / 60) + " h" : "hace " + Math.round(m / 1440) + " d";
+}
+function admVends(){
+  const vistos = {}, extra = [];
+  [].concat(AD.ped, AD.pre, AD.cola, AD.rev, AD.hechos).forEach(x => { const n = admNorm(x.vend); if(n && !admEsYo(x.vend) && !vistos[n]){ vistos[n] = 1; extra.push(x.vend); } });
+  const base = ADM_VEND.slice(); extra.forEach(n => { if(!base.some(b => admNorm(b) === admNorm(n))) base.push(n); }); return base;
+}
+function admChips(){
+  const L = [["", "Todos"]].concat(admVends().map(n => [n, n]), [["__yo", "Yo"]]);
+  return `<div class="achips" role="group" aria-label="Vendedor">${L.map(([k, l]) => `<button class="achip" data-ad="ven" data-k="${esc(k)}" aria-pressed="${AD.ven === k}">${esc(l)}</button>`).join("")}</div>`;
+}
+const admCli = v => v.nuevo ? "Cliente nuevo" + (v.cliente && !/^\s*cliente nuevo\s*$/i.test(String(v.cliente)) ? ": " + v.cliente : "") : (v.cliente || "Sin cliente");
+function admCard(v, conAnt){
+  const ab = !!AD.abre[v.id], nl = (v.lineas || []).length, cl = conAnt ? admAgCl(v.dias) : "";
+  const cred = v.contado ? "Contado" : v.vence > 0 ? v.vence + " días" : "Sin crédito";
+  const tar = v.tarifa === "bcv" ? "BCV" : v.tarifa === "usd" ? "USD" : "";
+  const lin = ab ? `<div class="aol">` + (v.lineas || []).map(l => { const u = Number(l[1]) || 0, p = Number(l[2]) || 0, d = Number(l[3]) || 0;
+      return `<div><b>${esc(l[0])}</b><span class="num">${u} × ${money(p)}${d ? " −" + d + " %" : ""}</span><span class="num">${money(u * p * (1 - d / 100))}</span></div>`; }).join("") + `</div>` : "";
+  return `<article class="od ao ${cl}"><button class="aoh" data-ad="abre" data-id="${esc(v.id)}" aria-expanded="${ab}">
+      <span class="ah1"><b class="aoc">${esc(admCli(v))}</b><b class="bs num aot">${money(v.total)}</b></span>
+      <span class="aom"><span class="num">${esc(v.num)}</span> · ${esc(admVenTxt(v.vend))}${conAnt ? ` · <span class="agx">${admAnt(v.dias)}</span>` : ""}</span>
+      <span class="aoch">${tar ? `<span class="tg">${tar}</span>` : ""}<span class="tg ne">${esc(cred)}</span><span class="tg ne">${nl} ${nl === 1 ? "línea" : "líneas"}</span>${ADM_SVG.cv}</span>
+      ${v.nota ? `<span class="aon">📝 ${esc(v.nota)}</span>` : ""}</button>${lin}
+    <div class="f"><button class="txt" data-ad="cop" data-num="${esc(v.num)}">Copiar para Claude</button><button class="txt" data-ad="ocu" data-id="${esc(v.id)}">Ocultar</button></div></article>`;
+}
+/* franjas: azul = ya salió del teléfono y va camino a Holded · ámbar = no se creó, hay que mirarlo */
+function admFranjas(tipo){
+  const es = x => (x.tipo === "presupuesto") === (tipo === "presupuesto") && admVenOk(x.vend);
+  const cola = AD.cola.filter(es), rev = AD.rev.filter(es); let h = "";
+  const bas = x => `<b>${esc(x.cliente || "Sin cliente")}</b> · ${esc(admVenTxt(x.vend))} · ${esc(x.tipo === "presupuesto" ? "Presupuesto" : "Pedido")}`;
+  if(cola.length) h += `<section class="astr az"><h3>En camino a Holded (${cola.length})</h3>` + cola.map(x => `<div class="ar"><div>${bas(x)}</div><small>Recibido ${esc(admHace(x.recibido))}${x.lineas ? " · " + esc(x.lineas) : ""}</small>${x.nota ? `<small>📝 ${esc(x.nota)}</small>` : ""}</div>`).join("") + `</section>`;
+  if(rev.length) h += `<section class="astr am"><h3>Revisar (${rev.length})</h3>` + rev.map(x => `<div class="ar"><div>${bas(x)}</div><div class="mot">${esc(x.obs || "No se pudo crear en Holded")}</div><small>Recibido ${esc(admHace(x.recibido))}${x.lineas ? " · " + esc(x.lineas) : ""}</small>${x.nota ? `<small>📝 ${esc(x.nota)}</small>` : ""}
+      <div class="f"><button class="txt" data-ad="ocu" data-id="${esc(x.id)}">Descartar</button></div></div>`).join("") + `</section>`;
+  return h;
+}
+/* qué le falta a una nota hecha: envío, vencimiento, descuento, nota del vendedor y avisos. El descuento global se espera una hora (Mango imprime y luego lo aplica). */
+function admProbs(h){
+  const p = [], t = s => String(s == null ? "" : s).trim(); let espera = false;
+  const envio = t(h.envio); if(envio && !/^(ok|n\/a|enviado solo)/i.test(envio)) p.push({ k:"Envío", t:envio, c:/no se pudo/i.test(envio) ? "rojo" : "" });
+  const venc = t(h.venc); if(venc && !/^(ok|corregido|pagada)/i.test(venc)) p.push({ k:"Vencimiento", t:venc, c:"" });
+  const desc = t(h.desc);
+  if(/^falta/i.test(desc)){ if(admAhora() - (h.primera || 0) > 3600) p.push({ k:"Descuento", t:desc, c:"" }); else espera = true; }
+  const nv = t(h.notaV); if(/^(falta|leer)/i.test(nv)) p.push({ k:"Nota del vendedor", t:nv, c:"" });
+  t(h.avisos).split(" · ").map(t).filter(Boolean).forEach(a => p.push({ k:"", t:a, c:/^STOCK:/i.test(a) ? "rojo" : "" }));
+  return { p, espera };
+}
+function admHechos(tipo){
+  const hs = AD.hechos.filter(h => (h.tipo === "presupuesto") === (tipo === "presupuesto") && admVenOk(h.vend)), ab = !!AD.fold["h" + tipo], n = hs.length;
+  let h = `<button class="afold" data-ad="fold" data-k="h${tipo}" aria-expanded="${ab}"><span>Hechos · últimos ${AD.cfg.hechosDias || 7} días (${n})</span>${ADM_SVG.cv}</button>`;
+  if(!ab) return h;
+  if(!n) return h + `<div class="box"><p class="hint">Nada en los últimos ${AD.cfg.hechosDias || 7} días.</p></div>`;
+  return h + `<div class="ahg">` + hs.map(x => {
+    const pr = admProbs(x), ok = !!x.ok || !!x.visto || !pr.p.length;
+    return `<div class="ahh ${ok ? "ok" : "pr"}"><div class="ahl"><span class="ahi">${ok ? ADM_SVG.ok : ADM_SVG.pr}</span>
+      <span class="ahx"><span class="num">${esc(x.origen || "")} → ${esc(x.nota || "")}</span> · <span class="num">${money(x.total)}</span> · ${esc(cbFecha(x.fecha))}<small>${esc(x.cliente || "")} · ${esc(admVenTxt(x.vend))}${x.visto && !x.ok ? " · revisado" : ""}</small></span></div>
+      ${!ok ? `<ul class="ahp">${pr.p.map(q => `<li class="${q.c}">${q.k ? "<b>" + esc(q.k) + ":</b> " : ""}${esc(q.t)}</li>`).join("")}</ul>` : pr.espera ? `<ul class="ahp"><li class="esp">Descuento: aún dentro de la hora para aplicarlo.</li></ul>` : ""}
+      ${!ok ? `<div class="f"><button class="txt" data-ad="rev" data-n="${esc(x.notaId)}">Revisado</button></div>` : x.visto && !x.ok ? `<div class="f"><button class="txt" data-ad="norev" data-n="${esc(x.notaId)}">Reabrir</button></div>` : ""}</div>`;
+  }).join("") + `</div>`;
+}
+function admPedidos(tipo){
+  const es = tipo === "presupuesto", lista = (es ? AD.pre : AD.ped).filter(v => admVenOk(v.vend)), vig = es ? lista.filter(v => !v.vencido) : lista, venc = es ? lista.filter(v => v.vencido) : [];
+  let h = admFranjas(tipo);
+  if(vig.length) h += vig.map(v => admCard(v, !es)).join("");
+  else if(!h && !venc.length) h += `<div class="box"><p class="hint">${AD.cargB ? (es ? "No hay presupuestos abiertos." : "No hay pedidos por convertir en nota.") : "Cargando…"}</p></div>`;
+  if(venc.length){ const ab = !!AD.fold.venc;
+    h += `<button class="afold" data-ad="fold" data-k="venc" aria-expanded="${ab}"><span>Vencidos (${venc.length}) · ${AD.cfg.presVence || 15} días o más</span>${ADM_SVG.cv}</button>` + (ab ? venc.map(v => admCard(v, false)).join("") : ""); }
+  return h + admHechos(tipo);
+}
+function admFacturas(){
+  const ps = AD.sol.filter(q => q.est === "pendiente" && admVenOk(q.ven)), hs = AD.sol.filter(q => q.est !== "pendiente" && admVenOk(q.ven));
+  const pr = AD.ret.filter(r => !r.rec && admVenOk(r.ven)), rr = AD.ret.filter(r => r.rec && admVenOk(r.ven));
+  let h = `<div class="achips" role="group" aria-label="Filtro de facturas">${[["sol", "Solicitudes" + (ps.length ? " (" + ps.length + ")" : "")], ["ret", "Retenciones" + (pr.length ? " (" + pr.length + ")" : "")]].map(([k, l]) => `<button class="achip" data-ad="sub" data-k="${k}" aria-pressed="${AD.sub === k}">${l}</button>`).join("")}</div>`;
+  if(AD.sub === "sol"){
     h += ps.length ? ps.map(q => `<article class="od"><div class="h"><b>${esc(q.cn)}</b><span class="st low">Por emitir</span></div>
       <div class="i num">Nota ${esc(q.nn)} · ${esc(q.ven)} · ${esc(cbHora(q.t))}</div>
       <div class="i" style="color:var(--ink)">${q.cm ? esc(q.cm) : "Sin instrucciones adicionales."}</div>
@@ -489,11 +607,30 @@ function admRender(){
     h += pr.length ? pr.map(r => card(r, false)).join("") : `<div class="box"><p class="hint">${AD.cargado ? "No hay comprobantes de retención por recibir." : "Cargando…"}</p></div>`;
     if(rr.length) h += `<h2 class="bs" style="margin-top:6px">Recibidos</h2>` + rr.map(r => card(r, true)).join("");
   }
+  return h;
+}
+function admRender(){
+  const el = $("vCob"); if(!el) return;
+  if(!S.adm){ el.innerHTML = `<div class="box"><p class="hint">Esta sección es solo de administración.</p></div>`; return; }
+  const nP = AD.ped.filter(v => admVenOk(v.vend)).length, nQ = AD.pre.filter(v => !v.vencido && admVenOk(v.vend)).length;
+  const nF = AD.sol.filter(q => q.est === "pendiente" && admVenOk(q.ven)).length + AD.ret.filter(r => !r.rec && admVenOk(r.ven)).length;
+  const tabs = `<div class="seg fl tabs" role="group" aria-label="Administración">${[["ped", "Pedidos" + (nP ? " (" + nP + ")" : "")], ["pre", "Presupuestos" + (nQ ? " (" + nQ + ")" : "")], ["fac", "Facturas" + (nF ? " (" + nF + ")" : "")]].map(([k, l]) => `<button data-ad="tab" data-k="${k}" aria-pressed="${AD.tab === k}">${l}</button>`).join("")}</div>`;
+  const err = (AD.tab === "fac" ? AD.err : AD.errB) || ""; let h = tabs + admChips() + (err ? `<div class="msg">${esc(err)}</div>` : "");
+  h += AD.tab === "fac" ? admFacturas() : admPedidos(AD.tab === "pre" ? "presupuesto" : "pedido");
+  h += `<p class="hint">${AD.recv ? "Actualizado " + esc(new Date(AD.recv).toLocaleTimeString("es-VE", { hour:"numeric", minute:"2-digit" })) + " · " : ""}Se actualiza sola cada 3 minutos; jala hacia abajo para actualizar ahora.</p>`;
   el.innerHTML = h;
 }
 $("vCob").addEventListener("click", e => {
   const a = e.target.closest("[data-ad]"); if(!a || VISTA !== "admin") return; const k = a.dataset.ad, id = a.dataset.id;
-  if(k === "tab"){ AD.tab = a.dataset.k; AD.msg = ""; admRender(); }
+  if(k === "tab"){ AD.tab = a.dataset.k; admRender(); window.scrollTo(0, 0); }
+  else if(k === "sub"){ AD.sub = a.dataset.k; admRender(); }
+  else if(k === "ven"){ AD.ven = a.dataset.k; admRender(); }
+  else if(k === "abre"){ AD.abre[id] = !AD.abre[id]; admRender(); }
+  else if(k === "fold"){ AD.fold[a.dataset.k] = !AD.fold[a.dataset.k]; admRender(); }
+  else if(k === "cop") admCopia("convierte " + a.dataset.num + " en nota");
+  else if(k === "ocu") admBac({ h:id, e:"ocultar" }, "Quitado de la bandeja", () => { ["ped", "pre", "cola", "rev"].forEach(c => { AD[c] = AD[c].filter(x => x.id !== id); }); }, id);
+  else if(k === "rev") admBac({ n:a.dataset.n, e:"revisado" }, "Marcado como revisado", () => { AD.hechos.forEach(x => { if(x.notaId === a.dataset.n) x.visto = Math.floor(Date.now() / 1000); }); });
+  else if(k === "norev") admBac({ n:a.dataset.n, e:"pendiente" }, "Vuelve a quedar pendiente", () => { AD.hechos.forEach(x => { if(x.notaId === a.dataset.n) x.visto = ""; }); });
   else if(k === "copia"){ const q = AD.sol.find(x => x.id === id); if(q) admCopia(admTxt(q)); }
   else if(k === "desc") admAcc({ s:id, e:"descartada" }, "Solicitud descartada");
   else if(k === "reab") admAcc({ s:id, e:"pendiente" }, "Solicitud reabierta");
@@ -502,6 +639,7 @@ $("vCob").addEventListener("click", e => {
 });
 setTimeout(() => { if(S.adm) admCarga(); }, 3000);
 setInterval(() => { if(S.adm && !document.hidden) admCarga(); }, 180000);
+document.addEventListener("visibilitychange", () => { if(!document.hidden && S.adm && Date.now() - AD.t > 60000) admCarga(); });
 
 /* ---------- eventos ---------- */
 $("vCob").addEventListener("click", async e => {

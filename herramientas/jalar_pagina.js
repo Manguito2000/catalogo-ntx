@@ -15,7 +15,7 @@ function ptrPinta(dy, txt, gira, suave){
 }
 function ptrPuede(t){
   if(PTR.busy || window.scrollY > 0 || document.body.classList.contains("tecl")) return false;
-  if(!$("zoom").hidden || (VISTA !== "catalogo" && VISTA !== "cobros" && VISTA !== "enviados")) return false;
+  if(!$("zoom").hidden || (VISTA !== "catalogo" && VISTA !== "cobros" && VISTA !== "enviados" && VISTA !== "admin")) return false;
   if(VISTA === "cobros" && (CB.nota || CB.ok || CB.fac || CB.edit)) return false;
   if(t && t.closest && t.closest("input,textarea,select")) return false;
   if(document.activeElement && document.activeElement.matches && document.activeElement.matches("input,textarea,select")) return false;
@@ -31,6 +31,7 @@ async function ptrRefresca(){
     if(j && Array.isArray(j.v) && j.v.length){ VENDS = j.v; if(window.NTX_PASE) await unlock(window.NTX_PASE); }
   }catch(e){ ok = false; }
   try{ CB.t0 = Date.now(); if(typeof cbRefresca === "function") await cbRefresca(); }catch(e){}
+  try{ if(typeof admCarga === "function" && S.adm){ await admCarga(true); if(VISTA === "admin" && (AD.err || AD.errB)) ok = false; } }catch(e){}   // administración: bandeja y facturas al día
   if(ok && typeof CB !== "undefined" && /sin conexión/.test(CB.sync || "")) ok = false;
   const resto = 700 - (Date.now() - t0); if(resto > 0) await new Promise(r => setTimeout(r, resto));
   ptrPinta(56, ok ? "Actualizado" : "Sin conexión", false, true);
