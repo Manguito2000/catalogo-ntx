@@ -48,3 +48,10 @@ Diseño aprobado por Mango (21 nov 2026):
 - Insignia roja del botón ADMIN: pedidos abiertos + rev + facturas pendientes + hechos con ⚠ «STOCK:». Los presupuestos no cuentan.
 - Refresco: al abrir y cada 3 min (igual que hoy), y al jalar hacia abajo.
 - Mantener la estética del portal y los colores de día/noche (`--red-tx` para texto rojo).
+
+## Para cuando se automatice la conversión pedido → nota (pendiente)
+Hoy Mango convierte a mano y cumple a mano lo que piden las notas de los vendedores (p. ej. NE4256 trae los «10 C251A» de la nota de Elías; NE4262 trae la A612 que Gabriel pidió «agregar al pedido pendiente»). Cuando la conversión la haga Claude:
+- Leer la nota del vendedor (📝 en la descripción del pedido, o «Nota:» en notes) y aplicarla: códigos y cantidades a agregar; «agregar al pedido pendiente» = unir con el pedido abierto del mismo cliente.
+- Agregar esas piezas **al pedido antes de convertirlo** (o crear la nota por API con la etiqueta so######), nunca solo en la nota: lo agregado solo en la nota no baja del stock.
+- Si la nota no se puede interpretar con seguridad, preguntar a Mango antes de emitir.
+- Stock regularizado el 21 nov 2026 por esta causa: NE4262 (A612 −1, MT1 −2) y NE4256 (C251A −10, C128A −8), con la descripción «NEXXXX CLIENTE FECHA - Regularización: línea facturada no descontada», fechados el día de la nota.
