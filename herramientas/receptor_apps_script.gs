@@ -1,8 +1,8 @@
 // Receptor del "Catálogo NTX Vendedores" (portal de ventas NTX). Vive en la cuenta de Google de Mango (script.google.com).
 // Implementar como aplicación web: "Ejecutar como: yo", "Acceso: cualquier persona".
 // Hace tres cosas:
-//  1) Recibe los pedidos de la página (?p=...) y los manda por correo limpio: asunto "PEDIDO NTX · cliente · vendedor · id",
-//     cuerpo legible y la referencia #NTX1. al final (oculta en el HTML) para que Claude los pase a Holded.
+//  1) Recibe los pedidos de la página (?p=...). Desde nov 2026 los crea él mismo en Holded (pedidos_apps_script.gs, pdRuta) y
+//     manda el correo con el resultado; recibirPedido queda solo como respaldo si pdRuta no existe.
 //  2) Portero de dispositivos (?a=entrar): el primer dispositivo de cada vendedor queda registrado; cualquier otro queda
 //     esperando la aprobación de Mango, que recibe un correo con botones para aprobar o rechazar.
 //     Sin aprobación el servidor no entrega la llave del vendedor, y sin esa llave el código solo no abre nada.
@@ -17,6 +17,7 @@ var MAX_INTENTOS = 8;              // códigos errados por dispositivo y hora
 /* ---------- entrada ---------- */
 function doGet(e) {
   var q = (e && e.parameter) || {};
+  if (typeof pdRuta === "function") { var r = pdRuta(q); if (r) return r; }   // pedidos directo a Holded y bandeja: pedidos_apps_script.gs
   if (q.a === "entrar") return json(entrar(q));
   if (q.a === "revisar") return paginaRevisar(q.r || "");
   if (q.a === "admin") return paginaAdmin(q.k || "");

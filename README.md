@@ -11,4 +11,5 @@ Catálogo de motores, aspas, bobinas, carboneras, conectores y relays NTX para v
 - `herramientas/refrescar_datos.py`: refresca `datos.json` desde Holded (tarea automática).
 - `herramientas/aplicar_jalar.py`: agrega «jalar para actualizar» (se aplica sobre el plano antes de armar).
 - `herramientas/portal.py`: abre `index.html` para editar el catálogo y lo vuelve a armar cifrado.
-- `herramientas/receptor_apps_script.gs`: plantilla del receptor (pedidos, portero de dispositivos y panel). Los valores secretos no están en este repositorio.
+- `herramientas/receptor_apps_script.gs`: plantilla del receptor (portero de dispositivos y panel). Los valores secretos no están en este repositorio.
+- `herramientas/pedidos_apps_script.gs`: crea los pedidos del portal directo en Holded, revisa las notas que salen de pedidos (envío, vencimiento, descuento, nota del vendedor) y da los datos de la bandeja de Mango. Ver `herramientas/PEDIDOS.md`.
