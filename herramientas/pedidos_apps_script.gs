@@ -32,7 +32,8 @@ var PD = {
   bcv: "6a230ac4aac0c5474e02901d",         // tarifa BCV
   credito: 30, contado: 3,                 // días de vencimiento de la nota (regla de Mango)
   hechosDias: 7, presVence: 15,            // bandeja: hechos visibles 7 días; presupuestos vencidos a los 15
-  revisarDias: 3,                          // solo se corrigen notas de los últimos 3 días
+  revisarDias: 3,                          // solo se corrigen notas de los últimos 3 días...
+  piso: 1794783600, pisoHasta: 1796097600, // ...salvo la primera vez: hasta el 1 dic 2026 se revisan también las notas desde el 16 nov (NE4248, NE4254, NE4258…)
   enviarSolo: true, corregirVencimiento: true
 };
 var PD_COLS = ["Recibido", "Vendedor", "Cliente", "Tipo", "Tarifa", "Desc %", "Contado", "Líneas", "Nota", "Estado", "Documento", "Total", "Observación",
@@ -236,6 +237,7 @@ function pdReintentar() {
 // Revisa las notas (facturas NE) que salieron de un pedido o presupuesto en los últimos días
 function pdRevisarNotas(seco) {
   var ahora = Math.floor(Date.now() / 1000), desde = ahora - (PD.revisarDias + 1) * 86400;
+  if (ahora < PD.pisoHasta) desde = Math.min(desde, PD.piso);
   var notas = pdGet("documents/invoice?starttmp=" + desde + "&endtmp=" + (ahora + 86400) + "&sort=created-desc");
   var h = pdHoja("Revisión notas", PD_REV), filas = pdFilas(h, PD_REV), porId = {};
   filas.forEach(function (f) { porId[String(f.notaId)] = f; });
@@ -249,7 +251,7 @@ function pdRevisarNotas(seco) {
     if (!hermanas) hermanas = pdGet("documents/invoice?starttmp=" + (ahora - 75 * 86400) + "&endtmp=" + (ahora + 86400));
     var origen = pdGet("documents/" + org.tipo + "/" + org.id);
     var env = org.tipo === "salesorder" && !org.porEtiqueta ? pdGet("documents/salesorder/" + org.id + "/shippeditems") : null;
-    var ev = pdEvaluar(n, origen, org, hermanas.filter(function (x) { var o2 = pdOrigenDe(x, mapa); return o2 && o2.id === org.id; }), env, skus, ahora);
+    var ev = pdEvaluar(n, origen, org, desde, hermanas.filter(function (x) { var o2 = pdOrigenDe(x, mapa); return o2 && o2.id === org.id; }), env, skus, ahora);
     var acc = [];
     if (!seco && PD.enviarSolo && ev.enviar.length) {
       var rs = pdHttp("post", "documents/salesorder/" + org.id + "/shipbylines", { lines: ev.enviar.map(function (x) { return { itemLinePosition: x.itemLinePosition, units: x.units }; }) });
@@ -307,7 +309,7 @@ function pdMapaNumeros(ahora) {                                                 
 function pdDia(ts) { return Utilities.formatDate(new Date((Number(ts) + 7200) * 1000), "UTC", "dd/MM/yyyy"); }   // fechas de Holded: medianoche de España
 
 // Evalúa una nota contra su pedido o presupuesto. Pura (no llama a Holded).
-function pdEvaluar(n, origen, org, hermanas, env, skus, ahora) {
+function pdEvaluar(n, origen, org, desde, hermanas, env, skus, ahora) {
   var det = {}, avisos = [];
   var linO = (origen.products || []), linN = (n.products || []);
   var uN = {}, uH = {};
@@ -345,7 +347,7 @@ function pdEvaluar(n, origen, org, hermanas, env, skus, ahora) {
   var venc = { dias: dias, actual: actual, fix: null, txt: "ok (" + actual + " días)" };
   if (actual < dias) {
     if (pagada) venc.txt = "pagada (" + actual + " días)";
-    else if (Number(n.date) >= ahora - (PD.revisarDias + 1) * 86400) { venc.fix = Number(n.date) + dias * 86400; venc.txt = "corregir: " + actual + " → " + dias + " días"; }
+    else if (Number(n.date) >= desde) { venc.fix = Number(n.date) + dias * 86400; venc.txt = "corregir: " + actual + " → " + dias + " días"; }
     else venc.txt = "vence a " + actual + " días; debía ser " + dias;
   }
 
