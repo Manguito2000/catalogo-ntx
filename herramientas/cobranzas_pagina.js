@@ -537,7 +537,7 @@ function admCard(v, conAnt){
       return `<div><b>${esc(l[0])}</b><span class="num">${u} × ${money(p)}${d ? " −" + d + " %" : ""}</span><span class="num">${money(u * p * (1 - d / 100))}</span></div>`; }).join("") + `</div>` : "";
   return `<article class="od ao ${cl}"><button class="aoh" data-ad="abre" data-id="${esc(v.id)}" aria-expanded="${ab}">
       <span class="ah1"><b class="aoc">${esc(admCli(v))}</b><b class="bs num aot">${money(v.total)}</b></span>
-      <span class="aom"><span class="num">${esc(v.num)}</span> · ${esc(admVenTxt(v.vend))}${conAnt ? ` · <span class="agx">${admAnt(v.dias)}</span>` : ""}</span>
+      <span class="aom"><span class="num">${esc(v.num)}</span> · ${esc(admVenTxt(v.vend))}${v.fecha ? " · " + esc(cbFecha(v.fecha)) : ""} · <span class="agx">${admAnt(v.dias)}</span></span>
       <span class="aoch">${tar ? `<span class="tg">${tar}</span>` : ""}<span class="tg ne">${esc(cred)}</span><span class="tg ne">${nl} ${nl === 1 ? "línea" : "líneas"}</span>${ADM_SVG.cv}</span>
       ${v.nota ? `<span class="aon">📝 ${esc(v.nota)}</span>` : ""}</button>${lin}
     <div class="f"><button class="txt" data-ad="cop" data-num="${esc(v.num)}">Copiar para Claude</button><button class="txt" data-ad="ocu" data-id="${esc(v.id)}">Ocultar</button></div></article>`;
