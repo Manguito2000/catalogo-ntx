@@ -274,7 +274,7 @@ function pdRevisarNotas(seco) {
       else { ev.venc.txt = "revisar en Holded: " + malo.join(", "); ev.avisos.push("Al corregir el vencimiento " + malo.join(", ")); }
     }
     var vals = { "Fecha": pdDia(n.date), "Nota": n.docNumber, "Origen": origen.docNumber, "Cliente": n.contactName,
-      "Vendedor": pdVendDe(origen.tags || n.tags || []), "Total": Math.round(Number(n.total) * 100) / 100, "Envío": ev.envio, "Vencimiento": ev.venc.txt,
+      "Vendedor": pdVendDoc(origen, null) || pdVendDoc(n, null), "Total": Math.round(Number(n.total) * 100) / 100, "Envío": ev.envio, "Vencimiento": ev.venc.txt,
       "Descuento": ev.desc.txt, "Nota del vendedor": ev.notaV.txt, "Avisos": ev.avisos.join(" · "), "ts": Number(n.date), "notaId": n.id, "origenId": org.id,
       "tipo": org.tipo, "det": JSON.stringify(ev.det), "chk": ahora, "primera": f ? Number(f.primera) || ahora : ahora };
     if (seco) { log.push(vals); return; }
@@ -390,6 +390,19 @@ function pdCodigosEnTexto(t, skus) {
   }
   return out;
 }
+// Vendedor de un documento: etiqueta -> hoja Pedidos -> texto "Vendedor: X" de las notas (pedidos creados por la tarea vieja o sin enlace). Vacío = Mango.
+function pdVendDoc(doc, pt) {
+  var v = pdVendDe(doc.tags) || (pt ? String(pt.Vendedor || "") : "");
+  if (v && v !== "?") return v;
+  var m = String(doc.notes || "").match(/Vendedor:\s*([^·]+?)\s*(?:·|$)/);
+  return m ? m[1].trim() : "";
+}
+// Nombre del cliente nuevo (el contacto de Holded se llama CLIENTE NUEVO; el nombre real viaja en las notas y en la descripción)
+function pdNombreNuevo(doc) {
+  if (doc.contact !== PD.nuevo) return "";
+  var m = String(doc.notes || "").match(/CLIENTE NUEVO:\s*(.+?)\s*(?:\(falta crear|·|$)/) || String(doc.desc || "").match(/CLIENTE NUEVO:\s*([^·]+?)\s*(?:·|$)/);
+  return m ? m[1].trim() : "";
+}
 function pdVendDe(tags) { var t = (tags || []).filter(function (x) { return x === "rm" || VENDEDORES.hasOwnProperty(x); })[0]; return t ? pdNombre(t) : ""; }
 
 /* ---------- 3) bandeja de Mango ---------- */
@@ -411,7 +424,7 @@ function pdBandeja(q) {
   ped.forEach(function (x) { if (x.docId) portalPor[String(x.docId)] = x; });
   var vista = function (x, tipo) {
     var pt = portalPor[x.id], notes = String(x.notes || "");
-    return { id: x.id, num: x.docNumber, tipo: tipo, fecha: Number(x.date), cliente: x.contactName, clienteId: x.contact, vend: pdVendDe(x.tags) || (pt ? String(pt.Vendedor) : ""),
+    return { id: x.id, num: x.docNumber, tipo: tipo, fecha: Number(x.date), cliente: x.contactName, clienteId: x.contact, vend: pdVendDoc(x, pt), nombreNuevo: pdNombreNuevo(x),
       total: Math.round(Number(x.total) * 100) / 100, tarifa: /TARIFA BCV/.test(notes) ? "bcv" : /Pedido desde Pedidos NTX/.test(notes) ? "usd" : "",
       contado: /Pago de contado/i.test(notes), desc: Number(x.discount) || Math.max.apply(null, [0].concat((x.products || []).map(function (p) { return Number(p.discount) || 0; }))),
       vence: x.dueDate ? Math.round((Number(x.dueDate) - Number(x.date)) / 86400) : 0, nota: pdNotaVendedor(x), nuevo: x.contact === PD.nuevo,

@@ -528,7 +528,7 @@ function admChips(){
   const L = [["", "Todos"]].concat(admVends().map(n => [n, n]), [["__yo", "Yo"]]);
   return `<div class="achips" role="group" aria-label="Vendedor">${L.map(([k, l]) => `<button class="achip" data-ad="ven" data-k="${esc(k)}" aria-pressed="${AD.ven === k}">${esc(l)}</button>`).join("")}</div>`;
 }
-const admCli = v => v.nuevo ? "Cliente nuevo" + (v.cliente && !/^\s*cliente nuevo\s*$/i.test(String(v.cliente)) ? ": " + v.cliente : "") : (v.cliente || "Sin cliente");
+const admCli = v => v.nuevo ? "Cliente nuevo" + (v.nombreNuevo ? ": " + v.nombreNuevo : v.cliente && !/^\s*cliente nuevo\s*$/i.test(String(v.cliente)) ? ": " + v.cliente : "") : (v.cliente || "Sin cliente");
 function admCard(v, conAnt){
   const ab = !!AD.abre[v.id], nl = (v.lineas || []).length, cl = conAnt ? admAgCl(v.dias) : "";
   const cred = v.contado ? "Contado" : v.vence > 0 ? v.vence + " días" : "Sin crédito";
