@@ -279,4 +279,50 @@ header.top,.nav,.bar{will-change:transform}
 .cbbs>label:has(.fill){grid-column:auto}
 #rcOv .rcim{flex-direction:column;gap:12px;justify-content:flex-start}
 #rcOv .rcim img{max-height:none}
+/* ===== Comunicación visual (22 nov 2026): cada forma de pago con su color + símbolo, estados con franja, pestañas con símbolo y número ===== */
+:root{--m-ef:#00704F;--m-ef-bg:#DCF2EA;--m-us:#0A6A96;--m-us-bg:#DDF0FA;--m-ze:#86357A;--m-ze-bg:#F6E4F0;--m-bs:#8F5200;--m-bs-bg:#FCEBCC;--m-mp:#3D4B9E;--m-mp-bg:#E5E8F7}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--m-ef:#5FD3AE;--m-ef-bg:#0F3329;--m-us:#7CC8F0;--m-us-bg:#0D2C3D;--m-ze:#E59AD3;--m-ze-bg:#3A1633;--m-bs:#F5B851;--m-bs-bg:#3A2706;--m-mp:#A9B4F2;--m-mp-bg:#1E2346}}
+:root[data-theme="dark"]{--m-ef:#5FD3AE;--m-ef-bg:#0F3329;--m-us:#7CC8F0;--m-us-bg:#0D2C3D;--m-ze:#E59AD3;--m-ze-bg:#3A1633;--m-bs:#F5B851;--m-bs-bg:#3A2706;--m-mp:#A9B4F2;--m-mp-bg:#1E2346}
+.mt{display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:24px;height:22px;padding:0 5px;border-radius:7px;font:800 12px/1 var(--text);letter-spacing:0;vertical-align:middle}
+.mt svg{width:16px;height:16px}
+.mt.ef{background:var(--m-ef-bg);color:var(--m-ef)}.mt.us{background:var(--m-us-bg);color:var(--m-us)}.mt.ze{background:var(--m-ze-bg);color:var(--m-ze)}
+.mt.bs{background:var(--m-bs-bg);color:var(--m-bs)}.mt.mp{background:var(--m-mp-bg);color:var(--m-mp)}
+.mts{display:inline-flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.mtl{display:inline-flex;align-items:center;gap:6px}
+.mtx{margin-left:8px;color:var(--mut);font-weight:600}
+.mts+.mtx,.mtx+.mtx{margin-left:10px}
+.od .i .mtl,.cba .i .mtl{color:var(--ink);font-weight:700}
+.box>.mts{font-size:13.5px;font-weight:700}
+.rcmt .mtl{color:var(--ink);font-weight:700}
+.adm .mtl{font-weight:700}
+.adbx>.mtl{color:var(--ink)}
+/* formulario: cada forma de pago abierta muestra su símbolo; las demás se agregan con un toque */
+.cbf label.cbmf>span{gap:8px}
+.mfn{display:inline-flex;align-items:center;gap:7px;min-width:0}
+.mfa{display:inline-flex;align-items:center;gap:4px;flex:none}
+.mfx{width:32px;height:32px;margin:-6px -6px -6px 0;border-radius:8px;font-size:22px;line-height:1;font-weight:500;color:var(--mut)}
+.mfx:active{background:var(--bg)}
+.mtadd{display:grid;gap:8px;padding:10px 12px;border-radius:12px;border:1.5px dashed var(--line)}
+.mchips{display:flex;flex-wrap:wrap;gap:8px}
+.mchip{display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:6px 12px 6px 7px;border-radius:20px;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700;font-size:13.5px}
+.mchip::before{content:"+";order:-1;font-weight:800;color:var(--mut);margin-left:3px}
+.txt.sub{justify-self:start;font-size:12.5px;margin-top:-4px}
+.cbbsh .mfn b{font-size:15px}
+/* estados: el mismo color significa lo mismo en toda la app (azul por confirmar, verde confirmado, rojo con problema, ámbar te toca revisar) y siempre va con texto */
+.st.dif{background:var(--red-soft);color:var(--red-tx)}
+.cbw.venc{box-shadow:inset 4px 0 0 var(--red-tx)}
+.cbw.pronto{box-shadow:inset 4px 0 0 var(--warn)}
+.pron{color:var(--warn);font-weight:800}
+.od.fr.pc{box-shadow:inset 4px 0 0 var(--az)}.od.fr.ok{box-shadow:inset 4px 0 0 var(--ok)}.od.fr.am{box-shadow:inset 4px 0 0 var(--warn)}.od.fr.dif{box-shadow:inset 4px 0 0 var(--red-tx)}
+.cpill{display:inline-block;min-width:20px;height:20px;line-height:20px;padding:0 6px;margin-left:2px;border-radius:10px;font-size:11.5px;font-weight:800;text-align:center;background:var(--bg);color:var(--mut)}
+.cpill.az{background:var(--az-bg);color:var(--az)}.cpill.dif{background:var(--red-soft);color:var(--red-tx)}.cpill.ok{background:var(--ok-bg);color:var(--ok)}.cpill.am{background:var(--warn-bg);color:var(--warn)}
+.achip[aria-pressed="true"] .cpill{box-shadow:0 0 0 1.5px var(--surface)}
+/* el rojo de la marca queda para la acción principal de cada pantalla; las acciones que se repiten en cada tarjeta van en negro */
+.send.dk{background:var(--ink);color:var(--surface)}
+/* pestañas con símbolo y burbuja de número */
+.seg.tabs.ti4 button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 2px 7px;min-height:54px;font-size:12.5px;line-height:1.15}
+.tico{position:relative;display:inline-flex}
+.pill{position:absolute;top:-7px;left:13px;min-width:18px;height:18px;line-height:18px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-size:10.5px;font-weight:800;text-align:center;box-shadow:0 0 0 2px var(--surface)}
+.seg.tabs.ti4 button[aria-pressed="true"] .pill{box-shadow:0 0 0 2px var(--ink)}
+.tlb{white-space:nowrap;font-weight:700}
 /*FIN-COBRANZAS*/

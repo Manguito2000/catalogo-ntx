@@ -1,7 +1,7 @@
 /*COBRANZAS*/
 /* Pestaña Cobranzas del portal de ventas NTX (herramientas/COBRANZAS.md). Se inyecta en el catálogo con herramientas/aplicar_cobranzas.py.
    Datos: S.nt (notas del vendedor, vienen de datos.json) + cobros que anota el vendedor (los guarda y concilia el receptor de Apps Script). */
-const CB = { tab:"pend", solo:false, nota:null, edit:null, rec:null, last:"", url:{}, f:{ ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"" }, err:"", busy:false, ok:null, cobros:null, cola:[], avisos:[], del:null, t0:0, img:{}, cargado:false, sync:"", sol:[], ret:{}, fac:null, facTxt:"", facErr:"", facBusy:false, msgOk:"", up:"", caps:[], capCola:[], tasas:[], mpOn:false, bsOn:false };
+const CB = { tab:"pend", solo:false, nota:null, edit:null, rec:null, last:"", url:{}, f:{ ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"" }, err:"", busy:false, ok:null, cobros:null, cola:[], avisos:[], del:null, t0:0, img:{}, cargado:false, sync:"", sol:[], ret:{}, fac:null, facTxt:"", facErr:"", facBusy:false, msgOk:"", up:"", caps:[], capCola:[], tasas:[], mpOn:false, bsOn:false, on:{} };
 const LSK = "ntx-cobros", LSQ = "ntx-cobros-cola", CAPLS = "ntx-cap-cola";
 /* Descuento BCV (%): sale de config.json del repositorio (un solo número para todo el sistema). Mientras carga, el último conocido o 15. */
 let DBCV = 15; try{ DBCV = Number(localStorage.getItem("ntx-dbcv")) || 15; }catch(e){}
@@ -198,7 +198,7 @@ function cbCapRecalc(n){
   L.forEach(c => { const r = c.lec, k = r.met === "bs" ? "bsb" : r.met; if(r.monto > 0 && k in S){ S[k] += r.monto; set.add(k); } });
   (CB.capSet || []).forEach(k => { if(!set.has(k)){ CB.f[k] = ""; if(k === "bsb") CB.f.bs = ""; } });
   set.forEach(k => { CB.f[k] = cbCom(r2(S[k])); });
-  if(set.has("mp")) CB.mpOn = true; if(set.has("bsb")) CB.bsOn = true;
+  set.forEach(k => { if(k !== "bsb") CB.on[k] = true; }); if(set.has("mp")) CB.mpOn = true; if(set.has("bsb")){ CB.bsOn = true; CB.on.bs = true; }
   CB.capSet = Array.from(set);
   const fb = L.find(c => c.lec.met === "bs" && c.lec.fecha), fs = L.map(c => c.lec.fecha).filter(Boolean).sort();
   if(fb) CB.f.fp = fb.lec.fecha; else if(fs.length) CB.f.fp = fs[fs.length - 1];
@@ -235,14 +235,14 @@ function cbCapQuita(i){
   const n = cbNotas().find(x => x.id === CB.nota), c = (CB.caps || [])[i]; if(!c) return;
   if(c.url) URL.revokeObjectURL(c.url); CB.caps.splice(i, 1); if(n) cbCapRecalc(n); cobRender();
 }
-const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; };
+const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; CB.on = {}; };   // también olvida qué formas de pago se abrieron
 function cbCapHtml(){
   const L = CB.caps || [], M = { ze:"Zelle", us:"USDT / USDC", bs:"Bolívares", mp:"Mercantil Panamá" };
   const item = (c, i) => { let st = "";
     if(c.est === "leyendo") st = `<p class="hint"><b>${c.primera ? "Preparando el lector (solo la primera vez, puede tardar)…" : "Leyendo la captura…"}</b></p>`;
     else if(c.est === "error") st = `<div class="msg">No pude leer esta captura. Llena su monto a mano; la captura igual se guarda con el cobro.</div>`;
     else if(c.lec){ const r = c.lec;
-      st = `<div class="cblx"><b>${esc(M[r.met] || "No reconocí la forma de pago")}${r.monto > 0 ? " · " + (r.mon === "Bs" ? "Bs " + r.monto.toLocaleString("es-VE", { minimumFractionDigits:2, maximumFractionDigits:2 }) : money(r.monto)) : ""}</b>
+      st = `<div class="cblx"><b>${mtChip(r.met)}${esc(M[r.met] || "No reconocí la forma de pago")}${r.monto > 0 ? " · " + (r.mon === "Bs" ? "Bs " + r.monto.toLocaleString("es-VE", { minimumFractionDigits:2, maximumFractionDigits:2 }) : money(r.monto)) : ""}</b>
         <small>${[r.fecha ? cbFecha2(r.fecha) : "", r.ref ? "ref. " + esc(r.ref) : "", r.dest ? "a " + esc(r.dest) : ""].filter(Boolean).join(" · ")}</small></div>` + c.av.map(a => `<div class="msg">${esc(a)}</div>`).join(""); }
     return `<div class="cbcap"><img class="cbth" src="${esc(c.url)}" alt="Captura del pago ${i + 1}"><div class="cbcapt">${st}<button type="button" class="txt" data-cb="capdel" data-i="${i}" style="justify-self:start">Quitar esta captura</button></div></div>`; };
   return `<div class="cbcaps">${L.map(item).join("")}${L.some(c => c.lec) ? `<p class="hint">Revisa los montos antes de guardar.</p>` : ""}
@@ -318,7 +318,8 @@ function cobNav(v){
   $("navCob").setAttribute("aria-current", c ? "page" : "false"); $("navPed").setAttribute("aria-current", c || v === "admin" ? "false" : "page");
 }
 const cbF0 = () => ({ ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"" });
-const cbSt = c => c.est === "confirmado" ? `<span class="st ok">Confirmado</span>` : c.est === "revisar" ? `<span class="st low">Revisar</span>` : c.est === "rechazo" ? `<span class="st no">No registrado</span>` : c.est === "cola" ? `<span class="st no">Sin enviar</span>` : `<span class="st low">Por confirmar</span>`;
+const cbSt = c => c.est === "confirmado" ? `<span class="st ok">Confirmado</span>` : c.est === "revisar" ? `<span class="st low">Revisar</span>` : c.est === "rechazo" ? `<span class="st dif">No registrado</span>` : c.est === "cola" ? `<span class="st no">Sin enviar</span>` : `<span class="st az">Por confirmar</span>`;
+const cbStK = c => c.est === "confirmado" ? "ok" : c.est === "revisar" ? "am" : c.est === "rechazo" ? "dif" : c.est === "cola" ? "" : "pc";   // franja de color de la tarjeta
 const cbHora = t => t ? new Date(t * 1000).toLocaleString("es-VE", { day:"2-digit", month:"short", hour:"numeric", minute:"2-digit" }) : "";
 /* acciones de un cobro: ver recibo siempre; corregir o anular solo mientras administración no lo haya confirmado */
 function cbAcc(c){
@@ -342,10 +343,21 @@ function cobRender(){
   if(CB.fac){ el.innerHTML = av + cbFacHtml(); return; }
   if(CB.nota){ const h = cbFormHtml(); if(h){ el.innerHTML = av + h; if($("cbSum")) cbSum(); return; } }
   if(CB.tab === "rc" && CB.rc.ficha){ const f = rcFichas().find(x => x.id === CB.rc.ficha); if(f){ el.innerHTML = av + rcDetalleHtml(f); return; } CB.rc.ficha = null; }
-  const ne = cbCobros().filter(pendiente).length;
-  const tabs = `<div class="seg tabs" role="group" aria-label="Cobranzas">${[["pend", "Pendientes"], ["ent", "Por entregar" + (ne ? " (" + ne + ")" : "")], ["rc", "Recibos"]].map(([k, l]) => `<button data-cb="tab" data-k="${k}" aria-pressed="${CB.tab === k}">${l}</button>`).join("")}</div>`;
+  const ne = cbCobros().filter(c => pendiente(c) && !c.ad).length;
+  const tabs = tabsHtml("cb", "Cobranzas", [["pend", "Pendientes", "lista", 0], ["ent", "Por entregar", "mano", ne], ["rc", "Recibos", "recibo", 0]], CB.tab);
   el.innerHTML = tabs + av + (CB.msgOk ? `<div class="okb"><b>${esc(CB.msgOk)}</b></div>` : "") + (CB.tab === "rc" ? rcHtml() : CB.tab === "ent" ? cbEntHtml() : cbPendHtml());
 }
+/* pestañas con símbolo arriba y el número en una burbuja roja (las tres o cuatro caben en un teléfono) */
+const TAB_ICO = {
+  lista:`<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>`, mano:`<rect x="2.5" y="6.5" width="19" height="11" rx="2"/><circle cx="12" cy="12" r="2.4"/>`,
+  recibo:`<path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/>`, bolsa:`<path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2"/>`, doc:`<path d="M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5"/>`,
+  factura:`<path d="M6 3h12v18H6zM9 8h6M9 12h6M9 16h3"/>`, cobro:`<circle cx="9" cy="9" r="5.5"/><path d="M14.5 6.6A5.5 5.5 0 1 1 9.6 15"/>` };
+function tabsHtml(pfx, aria, L, act){
+  return `<div class="seg tabs ti4" role="group" aria-label="${esc(aria)}">${L.map(([k, l, ico, n]) => `<button data-${pfx === "cb" ? "cb" : "ad"}="tab" data-k="${k}" aria-pressed="${act === k}"${n ? ` aria-label="${esc(l)}, ${n} pendientes"` : ""}>
+    <span class="tico"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TAB_ICO[ico]}</svg>${n ? `<b class="pill" aria-hidden="true">${n}</b>` : ""}</span><span class="tlb">${esc(l)}</span></button>`).join("")}</div>`;
+}
+/* contador dentro de un chip de filtro, con el color del estado (y siempre con su texto al lado) */
+const cntB = (n, k) => ` <b class="cpill ${k || ""}">${n}</b>`;
 function cbPendHtml(){
   if(!Array.isArray(S.nt)) return `<div class="box"><p class="hint">Todavía no hay datos de cobranzas en este teléfono. Se cargan en el próximo refresco de Holded (12:40 pm y 6:40 pm).</p></div>`;
   const todas = cbRows(), venc = todas.filter(x => x.d != null && x.d < 0 && x.saldo >= 0.01);
@@ -361,21 +373,40 @@ function cbPendHtml(){
   ids.forEach(id => {
     const rows = g[id].sort((a, b) => (a.n.fecha || 0) - (b.n.fecha || 0));
     h += `<section class="cbg"><div class="cbh"><b>${esc(cbCliente(id))}</b><span class="bs num">${money(sum(rows))}</span></div>` + rows.map(x => {
-      const vc = x.d != null && x.d < 0;
-      return `<div class="cbw"><button class="cbr" data-cb="open" data-id="${esc(x.n.id)}"><span><span class="n bs">${esc(x.n.num)}</span> ${x.n.tar === "b" ? `<span class="tg">BCV</span>` : ""}${x.n.fac ? ` <span class="tg fa">FACTURA ${esc(x.n.fac[0])}</span>` : ""}<br><small>${esc(cbFecha(x.n.fecha))}${x.d != null ? " · " : ""}<span class="${vc ? "ven" : ""}">${esc(cbVTxt(x.d))}</span></small></span>
+      const vc = x.d != null && x.d < 0, pr = x.d != null && x.d >= 0 && x.d <= 3;
+      return `<div class="cbw${vc ? " venc" : pr ? " pronto" : ""}"><button class="cbr" data-cb="open" data-id="${esc(x.n.id)}"><span><span class="n bs">${esc(x.n.num)}</span> ${x.n.tar === "b" ? `<span class="tg">BCV</span>` : ""}${x.n.fac ? ` <span class="tg fa">FACTURA ${esc(x.n.fac[0])}</span>` : ""}<br><small>${esc(cbFecha(x.n.fecha))}${x.d != null ? " · " : ""}<span class="${vc ? "ven" : pr ? "pron" : ""}">${esc(cbVTxt(x.d))}</span></small></span>
         <span class="r"><span class="s bs num">${money(x.saldo)}</span>${esB(x.n) || x.n.fac ? `<br><small class="tb">${[esB(x.n) ? "tasa BCV" : "", x.n.fac ? "neto" : ""].filter(Boolean).join(" · ")}</small>` : ""}${x.pc >= 0.01 ? `<br><small class="pc">Abono por confirmar ${money(x.pc)}</small>` : ""}${x.ivaF >= 0.01 ? `<br><small class="pc">Falta IVA ${cbM(x.ivaF, x.n)}</small>` : ""}</span></button>${cbFilaAcc(x.n, x.saldo)}</div>`;
     }).join("") + `</section>`;
   });
   return h + `<p class="hint">${CB.vivo ? "Saldos de Holded al momento" : "Saldos de Holded al " + (S.fecha ? esc(new Date(S.fecha).toLocaleString("es-VE", { day:"2-digit", month:"short", hour:"numeric", minute:"2-digit" })) : "último refresco")}${CB.sync ? " · " + esc(CB.sync) : ""}. Lo que cobres hoy aparece como «abono por confirmar» hasta que administración lo registre.</p>`;
 }
+/* ---------- cada forma de pago tiene su color y su símbolo (nunca solo el color: siempre va con el nombre) ----------
+   Colores tomados de la paleta Okabe-Ito (se distinguen con daltonismo), oscurecidos para que el símbolo contraste sobre su fondo. */
+const MT_ICO = { ef:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><rect x="2.5" y="6.5" width="19" height="11" rx="2"/><circle cx="12" cy="12" r="2.4"/></svg>`,
+  us:"₮", ze:"Z", bs:"Bs", mp:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.5 12 4.5l8.5 5M6 11v6M10 11v6M14 11v6M18 11v6M3.5 20h17"/></svg>` };
+const MT_NOM = { ef:"Efectivo", us:"USDT", ze:"Zelle", bs:"Bolívares", mp:"Mercantil Panamá" };
+const MT_CTA = { "CAJA CHICA":"ef", "USDT":"us", "NUEVO ZELLE":"ze", "MERCANTIL PANAMÁ":"mp", "Caja para Operaciones en Tránsito":"bs", "Bolivares Cuenta Juridica":"bs" };
+const mtChip = k => MT_ICO[k] ? `<span class="mt ${k}" aria-hidden="true">${MT_ICO[k]}</span>` : "";
+const mtCta = c => MT_CTA[c] || (/zelle/i.test(c) ? "ze" : /usdt/i.test(c) ? "us" : /caja chica/i.test(c) ? "ef" : /bol[ií]var|tr[aá]nsito/i.test(c) ? "bs" : /mercantil/i.test(c) ? "mp" : "");
+/* las formas de pago de un cobro como etiquetas: [símbolo] Zelle $500.00 · … */
+function cbMetHtml(c, conTasa){
+  const L = [["bs", c.bs], ["ef", c.ef], ["us", c.us], ["ze", c.ze], ["mp", c.mp]].filter(x => Number(x[1]) > 0).map(([k, v]) => {
+    let t = MT_NOM[k] + " " + money(v);
+    if(conTasa && k === "bs" && Number(c.bsb) > 0) t = "Bs " + Number(c.bsb).toLocaleString("es-VE", { minimumFractionDigits:2, maximumFractionDigits:2 }) + (Number(c.tbc || c.ta) > 0 ? " a " + cbCom(Number(c.tbc || c.ta), 2) : "");
+    return `<span class="mtl">${mtChip(k)}${esc(t)}</span>`; });
+  const x = [Number(c.iv) > 0 ? "incluye IVA " + money(c.iv) : "", Number(c.dd) > 0 ? "desc. divisas " + c.dd + " %" : "", Number(c.cap) > 1 ? c.cap + " capturas" : Number(c.cap) > 0 ? "captura" : ""].filter(Boolean);
+  return `<span class="mts">${L.join("")}</span>${x.length ? `<span class="mtx">${esc(x.join(" · "))}</span>` : ""}`;
+}
 function cbMetodos(c){ return [["Bs", c.bs], ["Efectivo", c.ef], ["USDT", c.us], ["Zelle", c.ze], ["Mercantil Panamá", c.mp]].filter(x => x[1] > 0).map(x => x[0] + " " + money(x[1])).join(" · ") + (Number(c.iv) > 0 ? " · IVA " + money(c.iv) : "") + (Number(c.dd) > 0 ? " · desc. divisas " + c.dd + " %" : "") + (c.cap ? " · captura" : ""); }
 function cbEntHtml(){
   const todos = cbCobros().filter(c => c.est !== "anulado" && !c.ad).sort((a, b) => (b.t || 0) - (a.t || 0)), pend = todos.filter(pendiente), conf = todos.filter(c => c.est === "confirmado" && (c.tsc || c.t || 0) >= Date.now() / 1000 - 7 * 86400);
   const T = k => r2(pend.reduce((s, c) => s + (c[k] || 0), 0));
+  const otros = [["us", T("us")], ["ze", T("ze")], ["mp", T("mp")], ["bs", T("bs")]].filter(x => x[1] > 0);
   let h = `<div class="box"><span class="lbl">Efectivo que debes entregar</span><b class="bs num" style="font-size:38px;line-height:1">${money(T("ef"))}</b>
-    <small class="hint">USDT ${money(T("us"))} · Zelle ${money(T("ze"))}${T("mp") > 0 ? " · Mercantil Panamá " + money(T("mp")) : ""} · Bolívares ${money(T("bs"))} (en $) · ${pend.length} ${pend.length === 1 ? "cobro" : "cobros"} por confirmar</small></div>`;
-  const card = c => `<article class="od"><div class="h"><b>${esc(c.cn || "Cliente")}</b>${cbSt(c)}</div>
-      <div class="i num">${esc(c.rec || "Sin número")} · Nota ${esc(c.nn || "")} · ${esc(cbHora(c.t))}</div><div class="i num">${esc(cbMetodos(c))}${c.ta ? " · tasa " + c.ta : ""}${c.rf ? " · ref. " + esc(c.rf) : ""}</div>
+    ${otros.length ? `<span class="mts">${otros.map(([k, v]) => `<span class="mtl">${mtChip(k)}${MT_NOM[k]} ${money(v)}${k === "bs" ? " (en $)" : ""}</span>`).join("")}</span>` : ""}
+    <small class="hint">${pend.length ? pend.length + (pend.length === 1 ? " cobro" : " cobros") + " por confirmar" : "Nada por confirmar"}</small></div>`;
+  const card = c => `<article class="od fr ${cbStK(c)}"><div class="h"><b>${esc(c.cn || "Cliente")}</b>${cbSt(c)}</div>
+      <div class="i num">${esc(c.rec || "Sin número")} · Nota ${esc(c.nn || "")} · ${esc(cbHora(c.t))}</div><div class="i num">${cbMetHtml(c)}${c.ta ? `<span class="mtx">tasa ${esc(String(c.ta))}</span>` : ""}${c.rf ? `<span class="mtx">ref. ${esc(c.rf)}</span>` : ""}</div>
       ${(c.est === "revisar" || c.est === "rechazo") && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
       <div class="f"><span class="pr bs num">${money(c.nom)}</span>${cbAcc(c)}</div></article>`;
   h += pend.length ? pend.map(card).join("") : `<div class="box"><p class="hint">No tienes cobros por entregar. Cuando cobres, anótalo desde la pestaña Pendientes.</p></div>`;
@@ -394,7 +425,8 @@ function cbSaldoNota(){
 function cbFormHtml(){
   const x = cbSaldoNota(); if(!x){ CB.nota = null; CB.edit = null; return ""; }
   const n = x.n, bcv = esB(n), ed = x.ed, c0 = cbCalc(n, CB.f, x.saldo);
-  const F = (k, l) => `<label><span>${l}<button type="button" class="txt fill" data-cb="fill" data-k="${k}">Completar saldo</button></span><input class="fld num" id="cb_${k}" data-cb-in="${k}" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f[k])}"></label>`;
+  const F = (k, l) => `<label class="cbmf" data-mk="${k}"><span><span class="mfn">${mtChip(k)}${l}</span><span class="mfa"><button type="button" class="txt fill" data-cb="fill" data-k="${k}">Completar saldo</button><button type="button" class="mfx" data-cb="moff" data-k="${k}" aria-label="Quitar ${esc(MT_NOM[k])}">×</button></span></span><input class="fld num" id="cb_${k}" data-cb-in="${k}" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f[k])}"></label>`;
+  const abierto = k => cbNum(CB.f[k]) > 0 || (k === "mp" && CB.mpOn) || (CB.on && k in CB.on ? CB.on[k] : k === (bcv ? "bs" : "ef"));
   const mios = cbCobros().filter(c => c.n === n.id && c.est !== "anulado" && !(ed && c.id === ed.id)).sort((a, b) => (b.t || 0) - (a.t || 0));
   const adm = !!(CB.adNota && CB.adNota[0] === n.id && VISTA === "admin");
   let h = `<button class="txt" data-cb="${ed ? "editx" : "volver"}" style="justify-self:start">‹ ${ed ? "Dejar el cobro como estaba" : adm ? "Volver a cobros" : "Volver a pendientes"}</button><h2 class="bs">${ed ? "Corregir cobro" : "Nota " + esc(n.num)}</h2>
@@ -405,7 +437,7 @@ function cbFormHtml(){
       (pc.length ? `<div class="msg">${pc.map(p => esc(p[2]) + " tiene por registrar el recibo " + esc(p[1]) + " (" + money(p[3]) + ")").join("<br>")}. Ya se descontó de lo que falta.</div>` : "") + `</div>`; }
   else if(!ed) h += cbFacBox(n, x);
   if(mios.length && !ed) h += `<div class="box"><span class="lbl">Abonos que anotaste</span>` + mios.map(c => `<div class="cba"><div class="h"><b class="bs num">${money(c.nom)}</b>${cbSt(c)}</div>
-      <div class="i num">${esc(c.rec || "Sin número")} · ${esc(cbHora(c.t))} · ${esc(cbMetodos(c))}${Math.abs(cbBv(c, n) - c.nom) >= 0.01 ? " · abona " + cbM(cbBv(c, n), n) : ""}</div>${(c.est === "revisar" || c.est === "rechazo") && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
+      <div class="i num">${esc(c.rec || "Sin número")} · ${esc(cbHora(c.t))}${Math.abs(cbBv(c, n) - c.nom) >= 0.01 ? " · abona " + cbM(cbBv(c, n), n) : ""}</div><div class="i num">${cbMetHtml(c)}</div>${(c.est === "revisar" || c.est === "rechazo") && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
       <div class="f">${cbAcc(c)}</div></div>`).join("") + `</div>`;
   const soloIva = x.saldo < 0.01 && !!n.fac && cbIvaPend(n) >= 0.5;
   if(x.saldo < 0.01 && !ed && !soloIva) return h + `<div class="box"><p class="hint">Esta nota ya está cobrada por completo. Sale de tu lista cuando administración registre el pago en Holded. Si te equivocaste en un monto, toca «Corregir» en el abono.</p></div>`;
@@ -413,26 +445,28 @@ function cbFormHtml(){
   if(bcv && !CB.f.tb){ const t = cbTasaDe(CB.f.fp); if(t) CB.f.tb = cbCom(t, 4); }
   /* bolívares. Nota BCV: «Bolívares tasa BCV (monto en $)»; debajo, si se tiene el monto en Bs, la tasa BCV de la fecha del pago se pone sola.
      Nota en dólares: el desplegable «Nota en USD / pago en Bs» pide el monto en Bs y la tasa acordada (obligatoria); los dólares salen solos. */
-  const tBcvHoy = !bcv ? cbTasaDe(CB.f.fp) : 0;
+  const usdBs = !bcv && (c0.bs > 0 || cbNum(CB.f.bsb) > 0 || CB.bsOn), bcvBs = bcv && (CB.bsOn || cbNum(CB.f.bsb) > 0);
   const bsRow = bcv
-    ? `<div class="cbbs" id="cbBsRow"><small class="hint w2"><b>¿Tienes el monto en Bs?</b> Escríbelo aquí y la app saca los dólares BCV.</small>
+    ? (bcvBs ? `<div class="cbbs" id="cbBsRow"><div class="w2 cbbsh"><b>Monto en Bs</b><button type="button" class="txt" data-cb="bsoff">Cerrar</button></div>
       <label><span>Monto en Bs</span><input class="fld num" id="cb_bsb" data-cb-in="bsb" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f.bsb)}"></label>
       <label><span>Tasa BCV</span><input class="fld num" id="cb_tb" data-cb-in="tb" type="text" inputmode="decimal" autocomplete="off" placeholder="Bs por $" value="${esc(CB.f.tb)}"></label>
       <label class="w2"><span>Fecha del pago</span><input class="fld" id="cb_fp" data-cb-in="fp" type="date" value="${esc(CB.f.fp)}"></label>
-      <small class="hint w2">${CB.tasas.length ? "La tasa BCV de la fecha del pago se pone sola; cámbiala solo si el cliente usó otra." : "Escribe la tasa BCV del día del pago."}</small></div>`
-    : c0.bs > 0 || cbNum(CB.f.bsb) > 0 || CB.bsOn
-    ? `<div class="cbbs cbusd" id="cbBsRow"><div class="w2 cbbsh"><b>Nota en USD / pago en Bs</b><button type="button" class="txt" data-cb="bsoff">Quitar</button></div>
+      <small class="hint w2">${CB.tasas.length ? "La tasa BCV de la fecha del pago se pone sola; cámbiala solo si el cliente usó otra." : "Escribe la tasa BCV del día del pago."} Los dólares BCV salen solos.</small></div>`
+      : `<button type="button" class="txt sub" data-cb="bson">¿Tienes el monto en Bs? Escríbelo en Bs</button>`)
+    : `<div class="cbbs cbusd" id="cbBsRow"><div class="w2 cbbsh"><span class="mfn">${mtChip("bs")}<b>Nota en USD / pago en Bs</b></span><button type="button" class="mfx" data-cb="bsoff" aria-label="Quitar el pago en bolívares">×</button></div>
       <label><span>Monto en Bs</span><input class="fld num" id="cb_bsb" data-cb-in="bsb" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f.bsb)}"></label>
       <label><span>Tasa acordada</span><input class="fld num" id="cb_ta" data-cb-in="ta" type="text" inputmode="decimal" autocomplete="off" placeholder="Bs por $" value="${esc(CB.f.ta)}"></label>
-      <small class="hint w2"><b>La tasa es obligatoria:</b> la que acordaste con el cliente.${tBcvHoy ? ` <button type="button" class="txt" data-cb="tabcv">Usar la tasa BCV (${esc(cbCom(tBcvHoy, 2))})</button>` : ""}</small>
+      <small class="hint w2"><b>La tasa es obligatoria:</b> la que acordaste con el cliente.</small>
       <label><span>Equivale en $</span><input class="fld num" id="cb_bs" data-cb-in="bs" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f.bs)}"></label>
-      <label><span>Fecha del pago</span><input class="fld" id="cb_fp" data-cb-in="fp" type="date" value="${esc(CB.f.fp)}"></label></div>`
-    : `<button type="button" class="txt" data-cb="bson" style="justify-self:start">+ Nota en USD / pago en Bs</button>`;
-  const mpF = CB.mpOn || cbNum(CB.f.mp) > 0 ? F("mp", "Transferencia $ Mercantil Panamá") : `<button type="button" class="txt" data-cb="mpon" style="justify-self:start">+ Transferencia $ Mercantil Panamá</button>`;
-  const campos = bcv
-    ? F("bs", "Bolívares tasa BCV (monto en $)") + bsRow + F("ef", "Efectivo $") + F("us", "USDT / USDC $") + F("ze", "Zelle $") + mpF +
-      `<label id="cbDd" hidden><span>Descuento por pago en divisas</span><span class="pct"><input class="fld num" id="cb_dd" data-cb-in="dd" type="text" inputmode="decimal" autocomplete="off" placeholder="${DBCV}" value="${esc(CB.f.dd !== "" && CB.f.dd != null ? CB.f.dd : String(DBCV))}"><b>%</b></span><small class="hint">Lo normal es ${DBCV} %. Cámbialo solo si acordaste otro con el cliente.</small></label>`
-    : F("ef", "Efectivo $") + F("us", "USDT / USDC $") + F("ze", "Zelle $") + mpF + bsRow;
+      <label><span>Fecha del pago</span><input class="fld" id="cb_fp" data-cb-in="fp" type="date" value="${esc(CB.f.fp)}"></label></div>`;
+  const NOMS = { bs:"Bolívares tasa BCV (monto en $)", ef:"Efectivo $", us:"USDT / USDC $", ze:"Zelle $", mp:"Mercantil Panamá $" };
+  const orden = bcv ? ["bs", "ef", "us", "ze", "mp"] : ["ef", "us", "ze", "mp"];
+  const vis = orden.filter(abierto), ocultos = orden.filter(k => !abierto(k));
+  const add = ocultos.map(k => `<button type="button" class="mchip" data-cb="mon" data-k="${k}">${mtChip(k)}${k === "bs" ? "Bolívares" : MT_NOM[k]}</button>`).join("") +
+    (!bcv && !usdBs ? `<button type="button" class="mchip" data-cb="bson">${mtChip("bs")}Nota en USD / pago en Bs</button>` : "");
+  const campos = vis.map(k => F(k, NOMS[k]) + (k === "bs" ? bsRow : "")).join("") + (usdBs ? bsRow : "") +
+    (add ? `<div class="mtadd"><span class="hint">${vis.length || usdBs ? "¿Pagó también con otra forma?" : "¿Cómo pagó el cliente?"}</span><div class="mchips">${add}</div></div>` : "") +
+    (bcv ? `<label id="cbDd" hidden><span>Descuento por pago en divisas</span><span class="pct"><input class="fld num" id="cb_dd" data-cb-in="dd" type="text" inputmode="decimal" autocomplete="off" placeholder="${DBCV}" value="${esc(CB.f.dd !== "" && CB.f.dd != null ? CB.f.dd : String(DBCV))}"><b>%</b></span><small class="hint">Lo normal es ${DBCV} %. Cámbialo solo si acordaste otro con el cliente.</small></label>` : "");
   return h + `<div class="box"><span class="lbl">${ed ? "Montos corregidos" : mios.length ? "Registrar otro cobro" : "Registrar cobro"}</span>
       ${ed ? `<p class="hint">Al guardar se anula el recibo ${esc(ed.rec || "anterior")} y se crea uno nuevo con estos montos. Si ya le enviaste el recibo al cliente, envíale el nuevo.</p>` : ""}
       ${ed ? "" : `<p class="hint cbins"><b>Adjunta las capturas de los pagos</b> (Zelle, Binance, pago móvil, transferencia): la app llena los montos. Lo que no tenga captura, como el efectivo, escríbelo tú${bcv ? " en dólares BCV. Si paga en divisas, se aplica el descuento" : " en dólares"}.</p>`}
@@ -918,7 +952,7 @@ function admRender(){
   const nC = AD.cb ? admCobN() : 0;
   const nP = AD.ped.filter(v => admVenOk(v.vend)).length, nQ = AD.pre.filter(v => !v.vencido && admVenOk(v.vend)).length;
   const nF = AD.sol.filter(q => q.est === "pendiente" && admVenOk(q.ven)).length + AD.ret.filter(r => !r.rec && admVenOk(r.ven)).length;
-  const tabs = `<div class="seg fl tabs" role="group" aria-label="Administración">${[["ped", "Pedidos" + (nP ? " (" + nP + ")" : "")], ["pre", "Presupuestos" + (nQ ? " (" + nQ + ")" : "")], ["fac", "Facturas" + (nF ? " (" + nF + ")" : "")], ["cob", "Cobros" + (nC ? " (" + nC + ")" : "")]].map(([k, l]) => `<button data-ad="tab" data-k="${k}" aria-pressed="${AD.tab === k}">${l}</button>`).join("")}</div>`;
+  const tabs = tabsHtml("ad", "Administración", [["ped", "Pedidos", "bolsa", nP], ["pre", "Presupuestos", "doc", nQ], ["fac", "Facturas", "factura", nF], ["cob", "Cobros", "cobro", nC]], AD.tab);
   const err = AD.tab === "cob" ? "" : (AD.tab === "fac" ? AD.err : AD.errB) || ""; let h = tabs + admChips() + (err ? `<div class="msg">${esc(err)}</div>` : "");
   h += AD.tab === "fac" ? admFacturas() : AD.tab === "cob" ? admCobros() : admPedidos(AD.tab === "pre" ? "presupuesto" : "pedido");
   h += `<p class="hint">${AD.recv ? "Actualizado " + esc(new Date(AD.recv).toLocaleTimeString("es-VE", { hour:"numeric", minute:"2-digit" })) + " · " : ""}Se actualiza sola cada 3 minutos; jala hacia abajo para actualizar ahora.</p>`;
@@ -1046,7 +1080,7 @@ function rcFichas(){
 const RC_MES = ["ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
 function rcFichaHtml(f, ab){
   const rec = r => `<div class="rcrr"><div class="rcrh"><b>${r.rec ? "Recibo " + esc(r.rec) + " · " + esc(r.dia) : "Pago registrado por administración · " + esc(r.dia)}</b><b class="bs">${esc(r.m)}</b></div>
-      <span class="rcmt">${esc(r.met)}</span><span class="rce ${r.s}">${RC_ICO[r.s]}<span>${esc(r.adm)}</span></span>
+      <span class="rcmt">${r.c ? cbMetHtml(r.c, true) + (r.c.rf ? `<span class="mtx">ref. ${esc(r.c.rf)}</span>` : "") : `<span class="mts"><span class="mtl">${mtChip(mtCta(r.p[3] || ""))}${esc(r.met)}</span></span>`}</span><span class="rce ${r.s}">${RC_ICO[r.s]}<span>${esc(r.adm)}</span></span>
       ${r.c ? `<div class="rcbt">${r.c.rec ? `<button class="mini" data-cb="rec" data-id="${esc(r.c.id)}">Ver recibo</button>` : ""}${rcTieneCap(r.c) ? `<button class="mini" data-cb="rccap" data-id="${esc(r.c.id)}">Ver captura</button>` : ""}</div>` : ""}</div>`;
   return `<div class="rcf${ab ? " ab" : ""}"><span class="rct ${f.est}">${RC_ET[f.est]}</span><div class="rcc">
     <button class="rch" data-cb="rcopen" data-id="${esc(f.id)}" aria-expanded="${ab}"><span class="rcl"><span class="rcne bs">${esc(f.ne)}</span><span class="rccl">${esc(f.cli)}</span></span>
@@ -1067,7 +1101,7 @@ function rcHtml(){
   const todas = rcFichas(), cnt = { todos:todas.length, pc:0, dif:0, ok:0 }; todas.forEach(f => cnt[f.est]++);
   return `<label class="rcq"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
       <input type="search" id="rcQ" aria-label="Buscar por cliente, nota o recibo" placeholder="Cliente, nota o recibo" autocomplete="off" value="${esc(CB.rc.q)}"></label>
-    <div class="achips" role="group" aria-label="Filtro">${[["todos", "Todas"], ["pc", "Por confirmar"], ["dif", "Con diferencia"], ["ok", "Confirmadas"]].map(([k, l]) => `<button class="achip" data-cb="rcf" data-k="${k}" aria-pressed="${CB.rc.f === k}">${l} ${cnt[k]}</button>`).join("")}</div>
+    <div class="achips" role="group" aria-label="Filtro">${[["todos", "Todas"], ["pc", "Por confirmar"], ["dif", "Con diferencia"], ["ok", "Confirmadas"]].map(([k, l]) => `<button class="achip" data-cb="rcf" data-k="${k}" aria-pressed="${CB.rc.f === k}">${l}${cntB(cnt[k], { pc:"az", dif:"dif", ok:"ok" }[k])}</button>`).join("")}</div>
     ${CB.rc.err ? `<div class="msg">${esc(CB.rc.err)}</div>` : ""}<div id="rcL">${rcListaHtml()}</div>`;
 }
 /* ---- ficha de una nota: tu recibo frente a Holded ---- */
@@ -1178,8 +1212,8 @@ function admRegCard(c){
   if(c.tb === "b" && !(c.nd > 0) && c.npen != null) av.push("La nota aún no tiene el " + DBCV + " % en Holded: quedará un saldo hasta que se lo pongas.");
   if(c.npen != null && suma > c.npen + 0.5) av.push("En Holded la nota solo tiene " + money(c.npen) + " pendientes.");
   let h = `<div class="adw"><span class="rct pc">${esc(admMetTab(c))}</span><article class="rcc adc">${admCobCab(c)}
-    <span class="adm">${esc(rcMet(c))}</span>
-    <div class="adbx">${partes.map(p => `<span>${hechas.indexOf(p.k) >= 0 ? "Ya está en Holded" : "Va a la nota"}</span><b class="num">${money(p.m)}</b><small>en ${esc(p.cta)}${esc(admParteTxt(c, p))}</small>`).join("")}
+    <span class="adm">${cbMetHtml(c, true)}${c.rf ? `<span class="mtx">ref. ${esc(c.rf)}</span>` : ""}</span>
+    <div class="adbx">${partes.map(p => `<span class="mtl">${mtChip(p.k)}${hechas.indexOf(p.k) >= 0 ? "Ya está en Holded" : "Va a la nota"}</span><b class="num">${money(p.m)}</b><small>en ${esc(p.cta)}${esc(admParteTxt(c, p))}</small>`).join("")}
       ${Number(c.iv) > 0 ? `<span>IVA cobrado (no va a Holded)</span><b class="num">${cbM(Number(c.iv), { tar:c.tb === "b" ? "b" : "u" })}</b>` : ""}
       ${c.fa && ret && ret.rt > 0 ? `<small class="adret">Retuvo ${ret.rt} % · ${ret.rec ? "comprobante recibido" : "comprobante pendiente"}</small>` : ""}
       <small>Fecha del pago en Holded: ${esc(cbFecha2(c.fh || ""))}</small></div>
@@ -1187,7 +1221,7 @@ function admRegCard(c){
   if(busy) h += `<button class="send" disabled>REGISTRANDO EN HOLDED…</button>`;
   else if(conf) h += `<div class="adcf"><b>¿Registrar en Holded?</b><span>${falta.map(p => money(p.m) + " en " + esc(p.cta)).join(" + ")} · ${esc(cbFecha2(c.fh || ""))}</span>
       <div class="adbt"><button class="ghost" data-ad="cbno">Cancelar</button><button class="send" data-ad="cbsi" data-id="${esc(c.id)}">SÍ, REGISTRAR</button></div></div>`;
-  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="send" data-ad="cbreg" data-id="${esc(c.id)}">${soloEf ? "RECIBÍ EL EFECTIVO · REGISTRAR" : hechas.length ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED"}</button></div>`;
+  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="send dk" data-ad="cbreg" data-id="${esc(c.id)}">${soloEf ? "RECIBÍ EL EFECTIVO · REGISTRAR" : hechas.length ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED"}</button></div>`;
   return h + `</article></div>`;
 }
 function admDifCard(c){
@@ -1200,8 +1234,8 @@ function admDifCard(c){
   if(pie) h += `<span class="adcs">${esc(pie)}</span>`;
   if(sig) h += `<div class="msg">Holded todavía dice ${esc((c.cr || "").replace(/ \$[\d.,]+/g, ""))}. Corrígelo en Holded, o déjalo así si fue a propósito.</div>`;
   if(rev) h += an ? `<div class="adcf"><b>¿Anular el recibo ${esc(c.rec)}?</b><span>Desaparece de las cuentas por cobrar del vendedor.</span><div class="adbt"><button class="ghost" data-ad="cbno">No</button><button class="send" data-ad="cbanusi" data-id="${esc(c.id)}">SÍ, ANULAR</button></div></div>`
-    : `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="ghost" data-ad="cbanu" data-id="${esc(c.id)}">Anular</button><button class="send" data-ad="cbconf" data-id="${esc(c.id)}">CONFIRMAR ASÍ</button></div>`;
-  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}${sig ? `<button class="ghost" data-ad="cbacep" data-id="${esc(c.id)}">Dejar así</button>` : ""}<button class="send" data-ad="cbrev" data-id="${esc(c.id)}"${AD.cb.busy === c.id ? " disabled" : ""}>${AD.cb.busy === c.id ? "REVISANDO…" : "YA LO CORREGÍ"}</button></div>`;
+    : `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="ghost" data-ad="cbanu" data-id="${esc(c.id)}">Anular</button><button class="send dk" data-ad="cbconf" data-id="${esc(c.id)}">CONFIRMAR ASÍ</button></div>`;
+  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}${sig ? `<button class="ghost" data-ad="cbacep" data-id="${esc(c.id)}">Dejar así</button>` : ""}<button class="send dk" data-ad="cbrev" data-id="${esc(c.id)}"${AD.cb.busy === c.id ? " disabled" : ""}>${AD.cb.busy === c.id ? "REVISANDO…" : "YA LO CORREGÍ"}</button></div>`;
   return h + `</article></div>`;
 }
 function admArchCard(p){
@@ -1223,9 +1257,9 @@ function admCarHtml(lista){
     cp.notas.map(ps => { const x = ps[0], sal = x.pen < 0.01;
       return `<article class="rcc adc adnt"><div class="adch"><span class="adcl"><span class="rcne bs">${esc(x.nn)}</span><b class="adcn">${esc(x.cn)}</b></span><span class="st ${sal ? "ok" : "az"}">${sal ? "Saldada" : "Quedan " + money(x.pen)}</span></div>
         <div class="adpg">${ps.map(p => { const eq = p.rbv ? r2(p.m * p.rbv) : (S.ntar && S.ntar[p.n] === "b") || p.tb === "b" ? r2(p.m / FBCV()) : 0;
-          return `<span class="d">${esc(admDia(p.f))}</span><span class="m"><b>${esc(admCtaMet(p.cta))}${p.arch ? " (archivada)" : ""}</b><small>${p.rec ? "Recibo " + esc(p.rec) + (p.ad ? " · administración" : "") : "Directo en Holded, sin recibo"}</small></span>
+          return `<span class="d">${esc(admDia(p.f))}</span><span class="m"><b class="mtl">${mtChip(mtCta(p.cta))}${esc(admCtaMet(p.cta))}${p.arch ? " (archivada)" : ""}</b><small>${p.rec ? "Recibo " + esc(p.rec) + (p.ad ? " · administración" : "") : "Directo en Holded, sin recibo"}</small></span>
             <span class="v"><b class="num">${money(p.m)}</b>${eq ? `<small class="num">= ${money(eq)} BCV</small>` : ""}</span>`; }).join("")}</div>
-        <button class="send" data-ad="carn" data-id="${esc(x.n)}">YA LA ANOTÉ</button></article>`; }).join("") + `</section>`).join("");
+        <button class="send dk" data-ad="carn" data-id="${esc(x.n)}">YA LA ANOTÉ</button></article>`; }).join("") + `</section>`).join("");
 }
 async function admCarMarca(ps, e){
   try{ const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, redirect:"follow", body:JSON.stringify({ a:"adcar", k:S.adm, e, p:ps.map(p => [p.p, p.nn, p.m]) }) });
@@ -1254,7 +1288,7 @@ function admCobros(){
   if(!d) return admTasaHtml() + msgs + `<div class="box"><p class="hint">${esc(AD.cb.err || "Cargando cobros…")}</p></div>`;
   const regs = admCobRegs(d).filter(c => admVenOk(c.ven)).sort((a, b) => a.t - b.t), difs = admCobDifs(d).filter(c => admVenOk(c.ven)), arch = (d.arch || []).filter(p => admVenOk(p.ven));
   const car = (d.car || []).filter(p => !AD.cb.hechos[p.p] && admVenOk(p.ven)), nCar = new Set(car.map(p => p.n)).size;
-  let h = admTasaHtml() + `<div class="achips" role="group" aria-label="Cobros">${[["reg", "Por registrar " + regs.length], ["dif", "Con diferencia " + (difs.length + arch.length)], ["car", "Por anotar " + nCar]].map(([k, l]) => `<button class="achip" data-ad="cbsub" data-k="${k}" aria-pressed="${AD.cb.sub === k}">${l}</button>`).join("")}</div>`;
+  let h = admTasaHtml() + `<div class="achips" role="group" aria-label="Cobros">${[["reg", "Por registrar", regs.length, "az"], ["dif", "Con diferencia", difs.length + arch.length, "dif"], ["car", "Por anotar", nCar, "am"]].map(([k, l, n, c]) => `<button class="achip" data-ad="cbsub" data-k="${k}" aria-pressed="${AD.cb.sub === k}">${l}${cntB(n, n ? c : "")}</button>`).join("")}</div>`;
   h += (AD.cb.err ? `<div class="msg">${esc(AD.cb.err)}</div>` : "") + msgs;
   if(AD.cb.sub === "reg"){
     h += `<div class="adhd"><h2 class="bs">POR REGISTRAR EN HOLDED</h2><p class="hint">Mira que el dinero haya entrado y regístralo. Cada cobro sale de aquí cuando Holded lo tiene.</p></div>
@@ -1339,9 +1373,10 @@ $("vCob").addEventListener("click", async e => {
   else if(k === "guardar") cbGuardar();
   else if(k === "capsel"){ const f = $("cbCapF"); if(f) f.click(); }
   else if(k === "mpon"){ CB.mpOn = true; cobRender(); }
+  else if(k === "mon"){ const f = a.dataset.k; CB.on[f] = true; cobRender(); const i = $("cb_" + f); if(i) i.focus(); }
+  else if(k === "moff"){ const f = a.dataset.k; CB.on[f] = false; CB.f[f] = ""; if(f === "mp") CB.mpOn = false; if(f === "bs"){ CB.f.bsb = ""; CB.bsOn = false; } cobRender(); }
   else if(k === "bson"){ CB.bsOn = true; cobRender(); const i = $("cb_bsb"); if(i) i.focus(); }
-  else if(k === "bsoff"){ CB.bsOn = false; CB.f.bs = ""; CB.f.bsb = ""; CB.f.ta = ""; cobRender(); }
-  else if(k === "tabcv"){ const n = cbNotas().find(x => x.id === CB.nota), t = cbTasaDe(CB.f.fp); if(n && t){ CB.f.ta = cbCom(t, 4); cbBsCalc(n); cobRender(); } }
+  else if(k === "bsoff"){ const n = cbNotas().find(x => x.id === CB.nota); CB.bsOn = false; CB.f.bsb = ""; if(!(n && esB(n))){ CB.f.bs = ""; CB.f.ta = ""; } cobRender(); }
   else if(k === "capdel") cbCapQuita(Number(a.dataset.i));
   else if(k === "fill"){
     const x = cbSaldoNota(); if(!x) return; const key = a.dataset.k, f = Object.assign({}, CB.f, { [key]:"" }), otros = cbCalc(x.n, f), rest = Math.max(0, x.saldo - otros.bv);
@@ -1379,7 +1414,7 @@ $("vCob").addEventListener("click", async e => {
 $("vCob").addEventListener("change", e => { if(e.target.id === "cbFile" && e.target.files && e.target.files[0]){ const f = e.target.files[0]; e.target.value = ""; cbSubir(f); }
   if(e.target.id === "cbCapF" && e.target.files && e.target.files.length){ const fs = Array.from(e.target.files); e.target.value = ""; cbCapElegida(fs); } });
 $("vCob").addEventListener("input", e => { if(e.target.id === "rcQ"){ CB.rc.q = e.target.value; const L = $("rcL"); if(L) L.innerHTML = rcListaHtml(); return; }
-  if(e.target.id === "cb_fcm"){ CB.facTxt = e.target.value; CB.facErr = ""; const c = $("cbFcn"), x = $("cbFerr"); if(c) c.textContent = CB.facTxt.length + " / 600"; if(x) x.textContent = ""; return; } const k = e.target.dataset && e.target.dataset.cbIn; if(!k) return; CB.f[k] = e.target.value; CB.err = "";
+  if(e.target.id === "cb_fcm"){ CB.facTxt = e.target.value; CB.facErr = ""; const c = $("cbFcn"), x = $("cbFerr"); if(c) c.textContent = CB.facTxt.length + " / 600"; if(x) x.textContent = ""; return; } const k = e.target.dataset && e.target.dataset.cbIn; if(!k) return; CB.f[k] = e.target.value; CB.err = ""; if(k in MT_NOM) CB.on[k] = true;
   /* bolívares: Bs ÷ tasa = dólares de la nota. La tasa BCV sigue a la fecha del pago mientras el vendedor no la cambie a mano */
   const n = cbNotas().find(x => x.id === CB.nota);
   if(n && ["bsb", "tb", "ta", "fp"].indexOf(k) >= 0){
