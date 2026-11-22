@@ -267,4 +267,16 @@ header.top,.nav,.bar{will-change:transform}
 .adpk b.bs{font-size:22px;line-height:1}
 .adpk small{font-size:12.5px;font-weight:600;color:var(--mut)}
 .adpk .num{display:flex;flex-direction:column;align-items:flex-end;font-weight:800;font-size:16px;white-space:nowrap}
+/* varias capturas por cobro y el desplegable «Nota en USD / pago en Bs» (22 nov 2026) */
+.cbcaps{display:grid;gap:8px;margin:4px 0 12px}
+.cbcaps .cbcap{margin:0}
+.cbcaps>.ghost{margin:0}
+.cbins{padding:10px 12px;border-radius:10px;background:var(--az-bg);color:var(--ink)}
+.cbins b{color:var(--az)}
+.cbusd{border:1.5px solid var(--line);background:var(--surface)}
+.cbbsh{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.cbbsh b{font-size:15px}
+.cbbs>label:has(.fill){grid-column:auto}
+#rcOv .rcim{flex-direction:column;gap:12px;justify-content:flex-start}
+#rcOv .rcim img{max-height:none}
 /*FIN-COBRANZAS*/

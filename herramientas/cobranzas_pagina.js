@@ -1,7 +1,7 @@
 /*COBRANZAS*/
 /* Pestaña Cobranzas del portal de ventas NTX (herramientas/COBRANZAS.md). Se inyecta en el catálogo con herramientas/aplicar_cobranzas.py.
    Datos: S.nt (notas del vendedor, vienen de datos.json) + cobros que anota el vendedor (los guarda y concilia el receptor de Apps Script). */
-const CB = { tab:"pend", solo:false, nota:null, edit:null, rec:null, last:"", url:{}, f:{ ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"" }, err:"", busy:false, ok:null, cobros:null, cola:[], avisos:[], del:null, t0:0, img:{}, cargado:false, sync:"", sol:[], ret:{}, fac:null, facTxt:"", facErr:"", facBusy:false, msgOk:"", up:"", cap:null, capCola:[], tasas:[], mpOn:false, bsOn:false };
+const CB = { tab:"pend", solo:false, nota:null, edit:null, rec:null, last:"", url:{}, f:{ ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"" }, err:"", busy:false, ok:null, cobros:null, cola:[], avisos:[], del:null, t0:0, img:{}, cargado:false, sync:"", sol:[], ret:{}, fac:null, facTxt:"", facErr:"", facBusy:false, msgOk:"", up:"", caps:[], capCola:[], tasas:[], mpOn:false, bsOn:false };
 const LSK = "ntx-cobros", LSQ = "ntx-cobros-cola", CAPLS = "ntx-cap-cola";
 /* Descuento BCV (%): sale de config.json del repositorio (un solo número para todo el sistema). Mientras carga, el último conocido o 15. */
 let DBCV = 15; try{ DBCV = Number(localStorage.getItem("ntx-dbcv")) || 15; }catch(e){}
@@ -185,55 +185,74 @@ function cbCapAvisos(r, n){
   if(ct && ct.sin_factura && n.fac) av.push("Esta nota tiene factura: el pago debía ir a la cuenta de AdriMan, no a " + ct.nombre + ".");
   if(r.fechaDe === "imagen") av.push("La captura no trae fecha: puse la del día en que llegó la imagen. Revísala.");
   const rf = cbRefN(r.ref);
-  const igual = cbCobros().find(c => c.est !== "anulado" && c.est !== "rechazo" && ((rf.length >= 6 && cbRefN(c.rf) === rf) ||
+  const igual = cbCobros().find(c => c.est !== "anulado" && c.est !== "rechazo" && ((rf.length >= 6 && String(c.rf || "").split("·").some(x => cbRefN(x) === rf)) ||
     (r.monto > 0 && c.fp && c.fp === r.fecha && Math.abs((Number(c[r.met === "bs" ? "bsb" : r.met]) || 0) - r.monto) < 0.01)));
   if(igual) av.push("Parece el mismo pago del recibo " + (igual.rec || "anterior") + (igual.nn ? " (nota " + igual.nn + ")" : "") + ". Si es un pago repartido en dos notas, está bien.");
   return av;
 }
-/* pone en el formulario lo que se leyó (sin tocar el efectivo ni lo que el vendedor ya escribió en otras formas de pago) */
-function cbCapAplica(r, n){
-  if(r.fecha) CB.f.fp = r.fecha;
-  if(r.met === "ze") CB.f.ze = cbCom(r.monto);
-  else if(r.met === "us") CB.f.us = cbCom(r.monto);
-  else if(r.met === "mp"){ CB.f.mp = cbCom(r.monto); CB.mpOn = true; }
-  else if(r.met === "bs"){ CB.f.bsb = cbCom(r.monto); CB.bsOn = true; if(esB(n)){ const t = cbTasaDe(CB.f.fp); if(t) CB.f.tb = cbCom(t, 4); } cbBsCalc(n); }
-  if(r.ref) CB.f.rf = r.ref;
+/* Varias capturas por cobro (p. ej. un Zelle y un pago móvil, o dos Zelle). Cada forma de pago que traen las capturas se llena con la SUMA de sus montos;
+   el efectivo y lo que no tenga captura no se toca. Al quitar una captura, se recalcula. La fecha del pago es la de la captura en bolívares (fija la tasa)
+   o la más reciente; las referencias se juntan con « · ». */
+function cbCapRecalc(n){
+  const L = (CB.caps || []).filter(c => c.lec), S = { ze:0, us:0, mp:0, bsb:0 }, set = new Set();
+  L.forEach(c => { const r = c.lec, k = r.met === "bs" ? "bsb" : r.met; if(r.monto > 0 && k in S){ S[k] += r.monto; set.add(k); } });
+  (CB.capSet || []).forEach(k => { if(!set.has(k)){ CB.f[k] = ""; if(k === "bsb") CB.f.bs = ""; } });
+  set.forEach(k => { CB.f[k] = cbCom(r2(S[k])); });
+  if(set.has("mp")) CB.mpOn = true; if(set.has("bsb")) CB.bsOn = true;
+  CB.capSet = Array.from(set);
+  const fb = L.find(c => c.lec.met === "bs" && c.lec.fecha), fs = L.map(c => c.lec.fecha).filter(Boolean).sort();
+  if(fb) CB.f.fp = fb.lec.fecha; else if(fs.length) CB.f.fp = fs[fs.length - 1];
+  if(set.has("bsb") && esB(n) && !CB.tbMan){ const t = cbTasaDe(CB.f.fp); if(t) CB.f.tb = cbCom(t, 4); }
+  if(set.has("bsb")) cbBsCalc(n);
+  const refs = Array.from(new Set(L.map(c => c.lec.ref).filter(Boolean)));
+  if(refs.length) CB.f.rf = refs.join(" · "); else if(CB.capRf && CB.f.rf === CB.capRf) CB.f.rf = "";
+  CB.capRf = refs.length ? CB.f.rf : "";
+  L.forEach((c, i) => { c.av = cbCapAvisos(c.lec, n); const rf = cbRefN(c.lec.ref);
+    if(rf.length >= 6 && L.slice(0, i).some(o => cbRefN(o.lec.ref) === rf)) c.av.push("Esta captura parece la misma que otra que ya adjuntaste."); });
 }
+const cbCapLeyendo = () => (CB.caps || []).some(c => c.est === "leyendo");
+const CAPMAX = 4;
 /* bolívares: monto en Bs ÷ tasa (BCV en notas BCV, la acordada en notas USD) = dólares de la nota */
 function cbBsCalc(n){
   const bsb = cbNum(CB.f.bsb), t = cbNum(esB(n) ? CB.f.tb : CB.f.ta);
   if(bsb > 0 && t > 0) CB.f.bs = cbCom(r2(bsb / t));
 }
-async function cbCapElegida(f){
-  const n = cbNotas().find(x => x.id === CB.nota); if(!n || !f) return;
-  if(CB.cap && CB.cap.url) URL.revokeObjectURL(CB.cap.url);
-  const d = f.lastModified ? new Date(f.lastModified) : new Date(), fi = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-  const cap = CB.cap = { f, url:URL.createObjectURL(f), est:"leyendo", primera:!window.Tesseract, lec:null, av:[] };
-  cobRender();
-  try{
-    const r = await Promise.race([ocrLee(f, fi), new Promise((_, rej) => setTimeout(() => rej(new Error("tiempo")), 60000))]);
-    if(CB.cap !== cap) return;
-    cap.lec = r; cap.av = cbCapAvisos(r, n); cap.est = "listo"; cbCapAplica(r, n);
-  }catch(e){ if(CB.cap !== cap) return; cap.est = "error"; }
-  if(VISTA === "cobros" && CB.nota === n.id) cobRender();
+async function cbCapElegida(files){
+  const n = cbNotas().find(x => x.id === CB.nota); if(!n || !files || !files.length) return;
+  CB.caps = CB.caps || [];
+  const nuevas = Array.from(files).slice(0, Math.max(0, CAPMAX - CB.caps.length)).map((f, i) => ({ f, url:URL.createObjectURL(f), est:"leyendo", primera:!window.Tesseract && i === 0, lec:null, av:[] }));
+  if(!nuevas.length) return; CB.caps = CB.caps.concat(nuevas); cobRender();
+  for(const cap of nuevas){                                                        // una tras otra: el lector es uno solo
+    if(CB.caps.indexOf(cap) < 0) continue;
+    const d = cap.f.lastModified ? new Date(cap.f.lastModified) : new Date(), fi = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    try{ const r = await Promise.race([ocrLee(cap.f, fi), new Promise((_, rej) => setTimeout(() => rej(new Error("tiempo")), 60000))]); cap.lec = r; cap.est = "listo"; }
+    catch(e){ cap.est = "error"; }
+    if(CB.caps.indexOf(cap) < 0 || CB.nota !== n.id) continue;
+    cbCapRecalc(n); if((VISTA === "cobros" || VISTA === "admin") && CB.nota === n.id) cobRender();
+  }
 }
+function cbCapQuita(i){
+  const n = cbNotas().find(x => x.id === CB.nota), c = (CB.caps || [])[i]; if(!c) return;
+  if(c.url) URL.revokeObjectURL(c.url); CB.caps.splice(i, 1); if(n) cbCapRecalc(n); cobRender();
+}
+const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; };
 function cbCapHtml(){
-  const c = CB.cap, M = { ze:"Zelle", us:"USDT / USDC", bs:"Bolívares", mp:"Mercantil Panamá" };
-  let st = "";
-  if(c && c.est === "leyendo") st = `<p class="hint"><b>${c.primera ? "Preparando el lector (solo la primera vez, puede tardar)…" : "Leyendo la captura…"}</b> Mientras tanto puedes revisar la nota.</p>`;
-  else if(c && c.est === "error") st = `<div class="msg">No pude leer la captura. Llena los montos a mano; la captura igual se guarda con el cobro.</div>`;
-  else if(c && c.lec){ const r = c.lec;
-    st = `<div class="cblx"><b>Leí: ${esc(M[r.met] || "?")}${r.monto > 0 ? " · " + (r.mon === "Bs" ? "Bs " + r.monto.toLocaleString("es-VE", { minimumFractionDigits:2, maximumFractionDigits:2 }) : money(r.monto)) : ""}</b>
-      <small>${[r.fecha ? cbFecha2(r.fecha) : "", r.ref ? "ref. " + esc(r.ref) : "", r.dest ? "a " + esc(r.dest) : ""].filter(Boolean).join(" · ")}</small></div>` +
-      c.av.map(a => `<div class="msg">${esc(a)}</div>`).join("") + `<p class="hint">Revisa el monto antes de guardar.</p>`; }
-  return `<div class="cbcap">${c ? `<img class="cbth" src="${esc(c.url)}" alt="Captura del pago">` : ""}<div class="cbcapt">${st ||
-      `<p class="hint">Si te pagaron por Zelle, Binance, pago móvil o transferencia, adjunta la captura: la app lee el monto, la fecha y la referencia.</p>`}
-    <input type="file" id="cbCapF" accept="image/*" hidden><button class="ghost" data-cb="capsel">${c ? "CAMBIAR CAPTURA" : "ADJUNTAR CAPTURA DEL PAGO"}</button></div></div>`;
+  const L = CB.caps || [], M = { ze:"Zelle", us:"USDT / USDC", bs:"Bolívares", mp:"Mercantil Panamá" };
+  const item = (c, i) => { let st = "";
+    if(c.est === "leyendo") st = `<p class="hint"><b>${c.primera ? "Preparando el lector (solo la primera vez, puede tardar)…" : "Leyendo la captura…"}</b></p>`;
+    else if(c.est === "error") st = `<div class="msg">No pude leer esta captura. Llena su monto a mano; la captura igual se guarda con el cobro.</div>`;
+    else if(c.lec){ const r = c.lec;
+      st = `<div class="cblx"><b>${esc(M[r.met] || "No reconocí la forma de pago")}${r.monto > 0 ? " · " + (r.mon === "Bs" ? "Bs " + r.monto.toLocaleString("es-VE", { minimumFractionDigits:2, maximumFractionDigits:2 }) : money(r.monto)) : ""}</b>
+        <small>${[r.fecha ? cbFecha2(r.fecha) : "", r.ref ? "ref. " + esc(r.ref) : "", r.dest ? "a " + esc(r.dest) : ""].filter(Boolean).join(" · ")}</small></div>` + c.av.map(a => `<div class="msg">${esc(a)}</div>`).join(""); }
+    return `<div class="cbcap"><img class="cbth" src="${esc(c.url)}" alt="Captura del pago ${i + 1}"><div class="cbcapt">${st}<button type="button" class="txt" data-cb="capdel" data-i="${i}" style="justify-self:start">Quitar esta captura</button></div></div>`; };
+  return `<div class="cbcaps">${L.map(item).join("")}${L.some(c => c.lec) ? `<p class="hint">Revisa los montos antes de guardar.</p>` : ""}
+    <input type="file" id="cbCapF" accept="image/*" multiple hidden>${L.length < CAPMAX ? `<button type="button" class="ghost" data-cb="capsel">${L.length ? "+ ADJUNTAR OTRA CAPTURA" : "ADJUNTAR CAPTURAS DEL PAGO"}</button>` : ""}</div>`;
 }
 const cbFecha2 = f => { const d = new Date(f + "T12:00:00"); return isNaN(d) ? f : d.toLocaleDateString("es-VE", { day:"numeric", month:"short", year:"numeric" }); };
 /* la captura se sube a administración después de guardar el cobro (cola en el teléfono: si no hay señal, se intenta luego) */
-async function cbCapGuarda(id, rec, f){
-  try{ const a = await cbArchivo(f, 1400, .75); CB.capCola = (CB.capCola || []).filter(x => x.id !== id).concat([{ id, rec, tipo:a.tipo, b64:a.b64, n:0 }]); cbSave(); }catch(e){}
+async function cbCapGuarda(id, rec, f, i){
+  i = i || 0;
+  try{ const a = await cbArchivo(f, 1400, .75); CB.capCola = (CB.capCola || []).filter(x => !(x.id === id && (x.i || 0) === i)).concat([{ id, i, rec, tipo:a.tipo, b64:a.b64, n:0 }]); cbSave(); }catch(e){}
   CB.capNueva = true; cbCapFlush();
 }
 async function cbCapFlush(){
@@ -242,10 +261,11 @@ async function cbCapFlush(){
   for(const it of CB.capCola.slice()){
     if(CB.cola.some(o => o.id === it.id && o.est === "cola")) continue;           // el cobro aún no llegó al receptor
     let r = null;
-    try{ const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, redirect:"follow", body:JSON.stringify({ a:"cap", cod, d, k:S.adm || "", x:{ id:it.id }, tipo:it.tipo, b64:it.b64 }) }); r = JSON.parse(await res.text()); }
+    try{ const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, redirect:"follow", body:JSON.stringify({ a:"cap", cod, d, k:S.adm || "", x:{ id:it.id, i:it.i || 0 }, tipo:it.tipo, b64:it.b64 }) }); r = JSON.parse(await res.text()); }
     catch(e){ break; }                                                              // sin conexión: se intenta luego
-    if(r && r.estado === "ok"){ CB.capCola = CB.capCola.filter(x => x.id !== it.id); const c = (CB.cobros || []).find(x => x.id === it.id); if(c) c.cap = 1; }
-    else if(++it.n >= 6 || (r && r.estado === "no")) CB.capCola = CB.capCola.filter(x => x.id !== it.id);   // el receptor no la acepta: no se insiste para siempre
+    const fuera = () => { CB.capCola = CB.capCola.filter(x => !(x.id === it.id && (x.i || 0) === (it.i || 0))); };
+    if(r && r.estado === "ok"){ fuera(); const c = (CB.cobros || []).find(x => x.id === it.id); if(c) c.cap = Math.max(Number(c.cap) || 0, (it.i || 0) + 1); }
+    else if(++it.n >= 6 || (r && r.estado === "no")) fuera();                         // el receptor no la acepta: no se insiste para siempre
   }
   cbSave(); CB.capSub = false;
   if(CB.capNueva){ CB.capNueva = false; setTimeout(cbCapFlush, 300); }   // llegó otra captura mientras se subía la anterior
@@ -391,20 +411,32 @@ function cbFormHtml(){
   if(x.saldo < 0.01 && !ed && !soloIva) return h + `<div class="box"><p class="hint">Esta nota ya está cobrada por completo. Sale de tu lista cuando administración registre el pago en Holded. Si te equivocaste en un monto, toca «Corregir» en el abono.</p></div>`;
   if(!CB.f.fp) CB.f.fp = cbHoy();
   if(bcv && !CB.f.tb){ const t = cbTasaDe(CB.f.fp); if(t) CB.f.tb = cbCom(t, 4); }
-  /* bolívares: monto en Bs, tasa y fecha del pago; los dólares salen solos (la tasa BCV de esa fecha la pone el sistema) */
-  const bsRow = `<div class="cbbs" id="cbBsRow"${bcv || c0.bs > 0 || cbNum(CB.f.bsb) > 0 || CB.bsOn ? "" : " hidden"}>
+  /* bolívares. Nota BCV: «Bolívares tasa BCV (monto en $)»; debajo, si se tiene el monto en Bs, la tasa BCV de la fecha del pago se pone sola.
+     Nota en dólares: el desplegable «Nota en USD / pago en Bs» pide el monto en Bs y la tasa acordada (obligatoria); los dólares salen solos. */
+  const tBcvHoy = !bcv ? cbTasaDe(CB.f.fp) : 0;
+  const bsRow = bcv
+    ? `<div class="cbbs" id="cbBsRow"><small class="hint w2"><b>¿Tienes el monto en Bs?</b> Escríbelo aquí y la app saca los dólares BCV.</small>
       <label><span>Monto en Bs</span><input class="fld num" id="cb_bsb" data-cb-in="bsb" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f.bsb)}"></label>
-      <label><span>${bcv ? "Tasa BCV" : "Tasa acordada"}</span><input class="fld num" id="cb_${bcv ? "tb" : "ta"}" data-cb-in="${bcv ? "tb" : "ta"}" type="text" inputmode="decimal" autocomplete="off" placeholder="${bcv ? "Bs por $" : "Ej. 1080"}" value="${esc(bcv ? CB.f.tb : CB.f.ta)}"></label>
+      <label><span>Tasa BCV</span><input class="fld num" id="cb_tb" data-cb-in="tb" type="text" inputmode="decimal" autocomplete="off" placeholder="Bs por $" value="${esc(CB.f.tb)}"></label>
       <label class="w2"><span>Fecha del pago</span><input class="fld" id="cb_fp" data-cb-in="fp" type="date" value="${esc(CB.f.fp)}"></label>
-      <small class="hint w2">${bcv ? (CB.tasas.length ? "La tasa BCV de la fecha del pago se pone sola; cámbiala si el cliente usó otra." : "Escribe la tasa BCV del día del pago.") : "En una nota en dólares pagada en bolívares, la tasa es obligatoria."}</small></div>`;
+      <small class="hint w2">${CB.tasas.length ? "La tasa BCV de la fecha del pago se pone sola; cámbiala solo si el cliente usó otra." : "Escribe la tasa BCV del día del pago."}</small></div>`
+    : c0.bs > 0 || cbNum(CB.f.bsb) > 0 || CB.bsOn
+    ? `<div class="cbbs cbusd" id="cbBsRow"><div class="w2 cbbsh"><b>Nota en USD / pago en Bs</b><button type="button" class="txt" data-cb="bsoff">Quitar</button></div>
+      <label><span>Monto en Bs</span><input class="fld num" id="cb_bsb" data-cb-in="bsb" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f.bsb)}"></label>
+      <label><span>Tasa acordada</span><input class="fld num" id="cb_ta" data-cb-in="ta" type="text" inputmode="decimal" autocomplete="off" placeholder="Bs por $" value="${esc(CB.f.ta)}"></label>
+      <small class="hint w2"><b>La tasa es obligatoria:</b> la que acordaste con el cliente.${tBcvHoy ? ` <button type="button" class="txt" data-cb="tabcv">Usar la tasa BCV (${esc(cbCom(tBcvHoy, 2))})</button>` : ""}</small>
+      <label><span>Equivale en $</span><input class="fld num" id="cb_bs" data-cb-in="bs" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f.bs)}"></label>
+      <label><span>Fecha del pago</span><input class="fld" id="cb_fp" data-cb-in="fp" type="date" value="${esc(CB.f.fp)}"></label></div>`
+    : `<button type="button" class="txt" data-cb="bson" style="justify-self:start">+ Nota en USD / pago en Bs</button>`;
   const mpF = CB.mpOn || cbNum(CB.f.mp) > 0 ? F("mp", "Transferencia $ Mercantil Panamá") : `<button type="button" class="txt" data-cb="mpon" style="justify-self:start">+ Transferencia $ Mercantil Panamá</button>`;
   const campos = bcv
-    ? F("bs", "Bolívares (dólares BCV)") + bsRow + F("ef", "Efectivo $") + F("us", "USDT / USDC $") + F("ze", "Zelle $") + mpF +
+    ? F("bs", "Bolívares tasa BCV (monto en $)") + bsRow + F("ef", "Efectivo $") + F("us", "USDT / USDC $") + F("ze", "Zelle $") + mpF +
       `<label id="cbDd" hidden><span>Descuento por pago en divisas</span><span class="pct"><input class="fld num" id="cb_dd" data-cb-in="dd" type="text" inputmode="decimal" autocomplete="off" placeholder="${DBCV}" value="${esc(CB.f.dd !== "" && CB.f.dd != null ? CB.f.dd : String(DBCV))}"><b>%</b></span><small class="hint">Lo normal es ${DBCV} %. Cámbialo solo si acordaste otro con el cliente.</small></label>`
-    : F("ef", "Efectivo $") + F("us", "USDT / USDC $") + F("ze", "Zelle $") + mpF + F("bs", "Bolívares (monto en $)") + (c0.bs > 0 || cbNum(CB.f.bsb) > 0 || CB.bsOn ? "" : `<button type="button" class="txt" data-cb="bson" style="justify-self:start">+ Pagó en bolívares (Bs y tasa)</button>`) + bsRow;
+    : F("ef", "Efectivo $") + F("us", "USDT / USDC $") + F("ze", "Zelle $") + mpF + bsRow;
   return h + `<div class="box"><span class="lbl">${ed ? "Montos corregidos" : mios.length ? "Registrar otro cobro" : "Registrar cobro"}</span>
       ${ed ? `<p class="hint">Al guardar se anula el recibo ${esc(ed.rec || "anterior")} y se crea uno nuevo con estos montos. Si ya le enviaste el recibo al cliente, envíale el nuevo.</p>` : ""}
-      ${bcv ? `<p class="hint">Nota en dólares a tasa BCV: anota los dólares BCV que pagó el cliente. Si paga en divisas, se aplica el descuento.</p>` : `<p class="hint">Escribe lo que el cliente te dio, en dólares, por cada forma de pago.</p>`}
+      ${ed ? "" : `<p class="hint cbins"><b>Adjunta las capturas de los pagos</b> (Zelle, Binance, pago móvil, transferencia): la app llena los montos. Lo que no tenga captura, como el efectivo, escríbelo tú${bcv ? " en dólares BCV. Si paga en divisas, se aplica el descuento" : " en dólares"}.</p>`}
+      ${ed && bcv ? `<p class="hint">Nota a tasa BCV: los montos van en dólares BCV.</p>` : ""}
       ${n.fac ? `<p class="hint">${soloIva ? "El neto ya está cobrado. Si el cliente pagó el IVA aparte, anótalo aquí en bolívares." : "Nota facturada: si el pago trae el IVA, anota todo lo que entró; la app separa el neto del IVA."}</p>` : ""}
       ${ed ? "" : cbCapHtml()}
       <div class="cbf">${campos}
@@ -435,8 +467,8 @@ function cbSum(){
   else if(n.fac && c.bv > 0){ const iv = cbIvaDe(n, c.bv);
     s.innerHTML = s.innerHTML.replace('<div class="big">', `<div><span>IVA ${IVAP} % aparte</span><b class="num">${cbM(iv.iva, n)}</b></div>` + (iv.rt ? `<div><span>Retención ${iv.rt} % del IVA</span><b class="num">−${cbM(iv.ret, n)}</b></div>` : "") +
       `<div><span>IVA que paga el cliente</span><b class="num">${cbM(iv.paga, n)}</b></div><div class="big">`); }
-  $("cbGo").disabled = c.nom <= 0 || sobra || sinTasa || sinTasaB || CB.busy || (CB.cap && CB.cap.est === "leyendo"); $("cbGo").textContent = CB.busy ? "GUARDANDO…" : CB.cap && CB.cap.est === "leyendo" ? "LEYENDO LA CAPTURA…" : CB.edit ? "GUARDAR CORRECCIÓN" : "GUARDAR COBRO";
-  $("cbErr").textContent = sobra ? (n.fac ? "Eso es más que el neto (" + cbM(x.saldo, n) + ") y el IVA (" + cbM(cbIvaPend(n), n) + ") que faltan." : "Eso es más de lo que falta de la nota (" + cbM(x.saldo, n) + ").") : sinTasa ? "Escribe la tasa que acordaste con el cliente: es obligatoria cuando una nota en dólares se paga en bolívares." : sinTasaB ? "Escribe la tasa BCV del día del pago para pasar los bolívares a dólares BCV." : CB.err;
+  $("cbGo").disabled = c.nom <= 0 || sobra || sinTasa || sinTasaB || CB.busy || cbCapLeyendo(); $("cbGo").textContent = CB.busy ? "GUARDANDO…" : cbCapLeyendo() ? "LEYENDO LAS CAPTURAS…" : CB.edit ? "GUARDAR CORRECCIÓN" : "GUARDAR COBRO";
+  $("cbErr").textContent = sobra ? (n.fac ? "Eso es más que el neto (" + cbM(x.saldo, n) + ") y el IVA (" + cbM(cbIvaPend(n), n) + ") que faltan." : "Eso es más de lo que falta de la nota (" + cbM(x.saldo, n) + ").") : sinTasa ? "Escribe la tasa acordada con el cliente: es obligatoria cuando una nota en USD se paga en bolívares." : sinTasaB ? "Escribe la tasa BCV del día del pago para pasar los bolívares a dólares BCV." : CB.err;
 }
 function cbOkHtml(){
   const c = CB.ok.cobro, n = cbNotas().find(x => x.id === c.n), sc = n ? cbVisible(n).saldo : 0;
@@ -536,7 +568,7 @@ function cobAbre(){ cbLoad(); CB.nota = null; CB.edit = null; CB.rec = null; CB.
 async function cbGuardar(){
   const x = cbSaldoNota(); if(!x || CB.busy) return; const c = cbCalc(x.n, CB.f, x.saldo);
   if(c.nom <= 0 || c.bv > x.saldo + 0.5 || c.iv > cbIvaPend(x.n) + 0.5 || (!esB(x.n) && c.bs > 0 && !(cbNum(CB.f.ta) > 0))) return;
-  const det = cbIvaDetecta(x.n, x.saldo, c), cap = CB.cap, lec = cap && cap.lec;   // se calcula antes de guardar: después el cobro ya cuenta en el IVA recibido
+  const det = cbIvaDetecta(x.n, x.saldo, c), caps = (CB.caps || []).slice(), lecs = caps.filter(k => k.lec).map(k => k.lec);   // se calcula antes de guardar: después el cobro ya cuenta en el IVA recibido
   CB.err = ""; CB.busy = true; cbSum();
   if(x.ed){   // corrección: primero se anula el cobro anterior; el nuevo sale con recibo nuevo
     if(x.ed.est === "cola"){ CB.cola = CB.cola.filter(k => k.id !== x.ed.id); cbSave(); }
@@ -549,20 +581,20 @@ async function cbGuardar(){
   }
   const o = { id:cbUid(), n:x.n.id, nn:x.n.num, cn:cbCliente(x.n.cid), t:Math.floor(Date.now() / 1000), nom:c.nom, ab:c.ab, bv:c.bv, iv:c.iv, dd:c.dd, tb:esB(x.n) ? "b" : "", ef:c.ef, us:c.us, ze:c.ze, mp:c.mp, bs:c.bs,
     ta:c.bs > 0 && !esB(x.n) ? cbNum(CB.f.ta) : 0, bsb:c.bs > 0 ? cbNum(CB.f.bsb) : 0, tbc:c.bs > 0 && esB(x.n) && cbNum(CB.f.bsb) > 0 ? Number(String(CB.f.tb || "").replace(",", ".")) || 0 : 0,
-    fp:/^\d{4}-\d{2}-\d{2}$/.test(CB.f.fp || "") ? CB.f.fp : "", ct:lec ? lec.ct || "?" : "", cd:lec && !lec.ct ? String(lec.dest || "").slice(0, 60) : "",
-    lx:lec ? [lec.met, lec.mon, lec.monto, lec.fecha + (lec.fechaDe === "imagen" ? "(img)" : ""), lec.hora, lec.ref].join(" ").slice(0, 160) : "",
-    rf:(CB.f.rf || "").trim().slice(0, 120), est:"cola", rec:"", fa:x.n.fac ? x.n.fac[0] : "", cap:cap ? 1 : 0 };
+    fp:/^\d{4}-\d{2}-\d{2}$/.test(CB.f.fp || "") ? CB.f.fp : "", ct:lecs.filter(l => l.met && l.met !== "ef").map(l => l.ct || "?").join(","), cd:lecs.filter(l => l.met && l.met !== "ef" && !l.ct).map(l => l.dest || "").filter(Boolean).join(" · ").slice(0, 120),
+    lx:lecs.map(l => [l.met, l.mon, l.monto, l.fecha + (l.fechaDe === "imagen" ? "(img)" : ""), l.hora, l.ref].join(" ")).join(" | ").slice(0, 300),
+    rf:(CB.f.rf || "").trim().slice(0, 120), est:"cola", rec:"", fa:x.n.fac ? x.n.fac[0] : "", cap:caps.length };
   if(S.adm && CB.adNota && CB.adNota[0] === x.n.id && VISTA === "admin") o.ad = 1;
   o.rec = cbSigRec(!!o.ad);
   const r = await cbEnviar(o); CB.busy = false;
   if(r.err){ CB.err = /mayor que lo que falta/.test(r.err) ? r.err + ". Holded ya tiene registrado un pago de esta nota; el saldo de esta pantalla estaba atrasado y se está actualizando." : r.err; CB.t0 = 0; cobRender(); cbRefresca(); return; }
   let cobro, reg = null;
   if(r.ok){ cobro = r.cobro; reg = r.reg || null; cbCambioRec(o, cobro); cbMerge(cobro); } else { cobro = o; CB.cola.push(o); cbSave(); }
-  if(cap && cap.f) cbCapGuarda(o.id, cobro.rec, cap.f);                                   // la captura se sube aparte, sin hacer esperar el recibo
+  caps.forEach((k, i) => { if(k.f) cbCapGuarda(o.id, cobro.rec, k.f, i); });                // las capturas se suben aparte, sin hacer esperar el recibo
   if(det){ CB.avisos.push("Nota " + x.n.num + ": " + det.txt);                                 // IVA: completo, retención 75/100 o incompleto
     if((det.est === "completo" || det.est === "r75") && det.rt !== ((cbRet(x.n) || {}).rt || 0)) cbRetSet(x.n.id, det.rt, null); }
-  if(CB.cap && CB.cap.url) URL.revokeObjectURL(CB.cap.url);
-  CB.f = cbF0(); CB.cap = null; CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; CB.nota = null; CB.ok = { cobro, reg }; cobRender(); cobBadge(); window.scrollTo(0, 0);
+  cbCapLimpia();
+  CB.f = cbF0(); CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; CB.nota = null; CB.ok = { cobro, reg }; cobRender(); cobBadge(); window.scrollTo(0, 0);
 }
 
 /* ---------- recibo (imagen + texto) ---------- */
@@ -932,7 +964,22 @@ const rcDia = ts => ts ? new Date(ts * 1000).toLocaleDateString("es-VE", { day:"
 const rcDiaH = ts => ts ? cbDia(ts).toLocaleDateString("es-VE", { day:"numeric", month:"short" }).replace(".", "") : "";
 const rcBs = v => "Bs " + Number(v).toLocaleString("es-VE", { minimumFractionDigits:2, maximumFractionDigits:2 });
 const rcPendCap = id => (CB.capCola || []).find(x => x.id === id);
-const rcTieneCap = c => !!(c && (c.cap || rcPendCap(c.id)));
+const rcPendCaps = id => (CB.capCola || []).filter(x => x.id === id).sort((a, b) => (a.i || 0) - (b.i || 0));
+/* visor de capturas: pide la primera (dice cuántas hay) y luego las demás */
+async function capVisor(pide, locales){
+  const ov = document.createElement("div"); ov.id = "rcOv"; ov.innerHTML = `<button class="rcx" aria-label="Cerrar">Cerrar</button><div class="rcim"><p>Cargando la captura…</p></div>`; document.body.appendChild(ov);
+  const cierra = () => ov.remove(); ov.querySelector(".rcx").addEventListener("click", cierra); ov.addEventListener("click", e => { if(e.target === ov || e.target.classList.contains("rcim")) cierra(); });
+  const box = ov.querySelector(".rcim"), imgs = [];
+  const pinta = msg => { if(!document.body.contains(ov)) return; box.innerHTML = imgs.map((u, i) => `<img alt="Captura del pago ${i + 1}" src="${u}">`).join("") + (msg ? `<p>${esc(msg)}</p>` : ""); };
+  (locales || []).forEach(x => imgs.push("data:" + x.tipo + ";base64," + x.b64));
+  if(!pide){ pinta(imgs.length ? "" : "No hay captura."); return; }
+  try{ const r0 = await pide(0);
+    if(!(r0 && r0.estado === "ok" && r0.b64)){ pinta(imgs.length ? "" : (r0 && r0.msg) || "No se pudo cargar la captura."); return; }
+    imgs.unshift("data:" + r0.tipo + ";base64," + r0.b64); pinta(Number(r0.n) > 1 ? "Cargando las demás…" : "");
+    for(let i = 1; i < Math.min(Number(r0.n) || 1, CAPMAX); i++){ const r = await pide(i); if(r && r.estado === "ok" && r.b64) imgs.splice(i, 0, "data:" + r.tipo + ";base64," + r.b64); pinta(i < (Number(r0.n) || 1) - 1 ? "Cargando las demás…" : ""); } }
+  catch(e){ pinta(imgs.length ? "" : "Sin conexión: no se pudo cargar la captura. Intenta de nuevo."); }
+}
+const rcTieneCap = c => !!(c && (Number(c.cap) > 0 || rcPendCap(c.id)));
 /* cuántas veces se puede ver la lista antes de pedir de nuevo al servidor */
 async function rcCarga(forzar){
   if(CB.rc.cargando || (!forzar && CB.rc.t && Date.now() - CB.rc.t < 45000)) return; CB.rc.cargando = true;
@@ -1058,13 +1105,7 @@ function rcDetalleHtml(f){
 /* captura a pantalla completa (la imagen vive en Drive de administración; el vendedor la ve a través del receptor) */
 async function rcVerCap(id){
   const c = rcTodos().find(x => x.id === id); if(!c) return;
-  const ov = document.createElement("div"); ov.id = "rcOv"; ov.innerHTML = `<button class="rcx" aria-label="Cerrar">Cerrar</button><div class="rcim"><p>Cargando la captura…</p></div>`; document.body.appendChild(ov);
-  const cierra = () => ov.remove(); ov.querySelector(".rcx").addEventListener("click", cierra); ov.addEventListener("click", e => { if(e.target === ov) cierra(); });
-  let url = CB.rc.cap[id]; const loc = rcPendCap(id);
-  if(!url && loc) url = "data:" + loc.tipo + ";base64," + loc.b64;
-  if(!url && c.rec){ try{ const r = await cbSrv("captura", { r:c.rec }); if(r && r.estado === "ok" && r.b64){ url = "data:" + r.tipo + ";base64," + r.b64; CB.rc.cap[id] = url; } else { ov.querySelector(".rcim").innerHTML = `<p>${esc((r && r.msg) || "No se pudo cargar la captura.")}</p>`; return; } }
-    catch(e){ ov.querySelector(".rcim").innerHTML = `<p>Sin conexión: no se pudo cargar la captura. Intenta de nuevo.</p>`; return; } }
-  if(url && document.body.contains(ov)) ov.querySelector(".rcim").innerHTML = `<img alt="Captura del pago" src="${url}">`;
+  capVisor(c.rec && Number(c.cap) > 0 ? i => cbSrv("captura", { r:c.rec, i }) : null, rcPendCaps(id));
 }
 async function rcAvisar(id){
   const c = rcTodos().find(x => x.id === id); if(!c || !c.rec || CB.rc.avBusy) return; CB.rc.avBusy = id; cobRender();
@@ -1108,10 +1149,10 @@ function admNotaAbre(id){
   const tar = (S.ntar && S.ntar[id]) || admTarifa(x.ln) || "?";
   CB.adCli = CB.adCli || {}; CB.adCli[x.c] = x.cn; CB.adX = x; CB.adNota = admFilaNota(x, tar === "l" ? "u" : tar);
   if(x.fac && !(CB.ret && CB.ret[id])){ CB.ret = CB.ret || {}; CB.ret[id] = { rt:x.rt || 0 }; }
-  CB.nota = id; CB.f = cbF0(); CB.cap = null; CB.edit = null; CB.ok = null; CB.err = ""; CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; CB.del = null;
+  CB.nota = id; CB.f = cbF0(); cbCapLimpia(); CB.edit = null; CB.ok = null; CB.err = ""; CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; CB.del = null;
   admRender(); window.scrollTo(0, 0);
 }
-const admNotaCierra = () => { CB.nota = null; CB.adNota = null; CB.adX = null; CB.edit = null; CB.cap = null; };
+const admNotaCierra = () => { CB.nota = null; CB.adNota = null; CB.adX = null; CB.edit = null; cbCapLimpia(); };
 const admCtaMet = c => RC_MET[c] || c || "Pago";
 const admDia = ts => rcDiaH(ts);
 function admTasaHtml(){
@@ -1254,12 +1295,7 @@ async function admCobAccion(a, ex, ok){
   if(r && r.estado === "ok"){ if(ok) ok(r); } else if(r) AD.cb.msg.push(r.msg || "No se pudo.");
   await admCobCarga(true); admRender();
 }
-async function admVerCap(id){
-  const ov = document.createElement("div"); ov.id = "rcOv"; ov.innerHTML = `<button class="rcx" aria-label="Cerrar">Cerrar</button><div class="rcim"><p>Cargando la captura…</p></div>`; document.body.appendChild(ov);
-  const cierra = () => ov.remove(); ov.querySelector(".rcx").addEventListener("click", cierra); ov.addEventListener("click", e => { if(e.target === ov) cierra(); });
-  try{ const r = await admSrv("adcap", { id }); ov.querySelector(".rcim").innerHTML = r && r.estado === "ok" && r.b64 ? `<img alt="Captura del pago" src="data:${esc(r.tipo)};base64,${r.b64}">` : `<p>${esc((r && r.msg) || "No se pudo cargar la captura.")}</p>`; }
-  catch(e){ ov.querySelector(".rcim").innerHTML = `<p>Sin conexión: no se pudo cargar la captura.</p>`; }
-}
+async function admVerCap(id){ capVisor(i => admSrv("adcap", { id, i })); }
 $("vCob").addEventListener("click", e => {
   const a = e.target.closest("[data-ad]"); if(!a || VISTA !== "admin") return; const k = a.dataset.ad, id = a.dataset.id, d = AD.cb.d;
   if(k === "cbsub"){ AD.cb.sub = a.dataset.k; AD.cb.conf = ""; admRender(); }
@@ -1297,13 +1333,16 @@ $("vCob").addEventListener("click", async e => {
   else if(k === "rccap") rcVerCap(a.dataset.id);
   else if(k === "rcav") rcAvisar(a.dataset.id);
   else if(k === "solo"){ CB.solo = a.dataset.k === "true"; cobRender(); }
-  else if(k === "open"){ CB.msgOk = ""; CB.nota = a.dataset.id; CB.edit = null; CB.del = null; CB.f = cbF0(); CB.err = ""; CB.cap = null; CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; cobRender(); top(); }
-  else if(k === "volver"){ if(CB.adNota && VISTA === "admin") admNotaCierra(); CB.nota = null; CB.edit = null; CB.del = null; CB.cap = null; cobRender(); }
+  else if(k === "open"){ CB.msgOk = ""; CB.nota = a.dataset.id; CB.edit = null; CB.del = null; CB.f = cbF0(); CB.err = ""; cbCapLimpia(); CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; cobRender(); top(); }
+  else if(k === "volver"){ if(CB.adNota && VISTA === "admin") admNotaCierra(); CB.nota = null; CB.edit = null; CB.del = null; cbCapLimpia(); cobRender(); }
   else if(k === "listo"){ const ad = CB.ok && CB.ok.cobro && CB.ok.cobro.ad; CB.ok = null; if(ad){ admNotaCierra(); AD.cb.pick = false; AD.cb.sub = "reg"; admCobCarga(true); } cobRender(); top(); }
   else if(k === "guardar") cbGuardar();
   else if(k === "capsel"){ const f = $("cbCapF"); if(f) f.click(); }
   else if(k === "mpon"){ CB.mpOn = true; cobRender(); }
-  else if(k === "bson"){ CB.bsOn = true; cobRender(); }
+  else if(k === "bson"){ CB.bsOn = true; cobRender(); const i = $("cb_bsb"); if(i) i.focus(); }
+  else if(k === "bsoff"){ CB.bsOn = false; CB.f.bs = ""; CB.f.bsb = ""; CB.f.ta = ""; cobRender(); }
+  else if(k === "tabcv"){ const n = cbNotas().find(x => x.id === CB.nota), t = cbTasaDe(CB.f.fp); if(n && t){ CB.f.ta = cbCom(t, 4); cbBsCalc(n); cobRender(); } }
+  else if(k === "capdel") cbCapQuita(Number(a.dataset.i));
   else if(k === "fill"){
     const x = cbSaldoNota(); if(!x) return; const key = a.dataset.k, f = Object.assign({}, CB.f, { [key]:"" }), otros = cbCalc(x.n, f), rest = Math.max(0, x.saldo - otros.bv);
     let v = rest;
@@ -1322,7 +1361,7 @@ $("vCob").addEventListener("click", async e => {
   else if(k === "share") cbShare(a.dataset.id);
   else if(k === "edit"){
     const c = cbCobros().find(x => x.id === a.dataset.id); if(!c) return; const m = v => v ? String(v).replace(".", ",") : "";
-    CB.nota = c.n; CB.edit = c.id; CB.del = null; CB.err = ""; CB.cap = null; CB.mpOn = Number(c.mp) > 0; CB.bsOn = Number(c.bsb) > 0; CB.tbMan = Number(c.tbc) > 0;
+    CB.nota = c.n; CB.edit = c.id; CB.del = null; CB.err = ""; cbCapLimpia(); CB.mpOn = Number(c.mp) > 0; CB.bsOn = Number(c.bsb) > 0; CB.tbMan = Number(c.tbc) > 0;
     CB.f = { ef:m(c.ef), us:m(c.us), ze:m(c.ze), mp:m(c.mp), bs:m(c.bs), bsb:m(c.bsb), tb:Number(c.tbc) > 0 ? cbCom(Number(c.tbc), 4) : "", ta:m(c.ta), fp:c.fp || "", rf:c.rf || "", dd:Number(c.dd) > 0 ? m(c.dd) : "" }; cobRender(); top();
   }
   else if(k === "editx"){ CB.edit = null; CB.f = cbF0(); CB.err = ""; cobRender(); }
@@ -1338,7 +1377,7 @@ $("vCob").addEventListener("click", async e => {
   }
 });
 $("vCob").addEventListener("change", e => { if(e.target.id === "cbFile" && e.target.files && e.target.files[0]){ const f = e.target.files[0]; e.target.value = ""; cbSubir(f); }
-  if(e.target.id === "cbCapF" && e.target.files && e.target.files[0]){ const f = e.target.files[0]; e.target.value = ""; cbCapElegida(f); } });
+  if(e.target.id === "cbCapF" && e.target.files && e.target.files.length){ const fs = Array.from(e.target.files); e.target.value = ""; cbCapElegida(fs); } });
 $("vCob").addEventListener("input", e => { if(e.target.id === "rcQ"){ CB.rc.q = e.target.value; const L = $("rcL"); if(L) L.innerHTML = rcListaHtml(); return; }
   if(e.target.id === "cb_fcm"){ CB.facTxt = e.target.value; CB.facErr = ""; const c = $("cbFcn"), x = $("cbFerr"); if(c) c.textContent = CB.facTxt.length + " / 600"; if(x) x.textContent = ""; return; } const k = e.target.dataset && e.target.dataset.cbIn; if(!k) return; CB.f[k] = e.target.value; CB.err = "";
   /* bolívares: Bs ÷ tasa = dólares de la nota. La tasa BCV sigue a la fecha del pago mientras el vendedor no la cambie a mano */

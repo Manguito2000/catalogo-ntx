@@ -123,13 +123,14 @@ function cobroNuevo(tag, q) {
     pon("Tarifa", tb ? "BCV" : "USD"); pon("Desc. divisas %", dd || ""); pon("Abono a la nota $", bv);
     // captura y datos nuevos (22 nov 2026)
     var tx = function (v, n) { return String(v || "").replace(/^[=+@-]+/, "").slice(0, n); };
-    var fp = /^\d{4}-\d{2}-\d{2}$/.test(String(c.fp || "")) ? String(c.fp) : "", ct = tx(c.ct, 20), cd = tx(c.cd, 60), avisos = [];
+    var fp = /^\d{4}-\d{2}-\d{2}$/.test(String(c.fp || "")) ? String(c.fp) : "", cd = tx(c.cd, 120), avisos = [];
+    var cts = String(c.ct || "").split(",").map(function (x) { return tx(x, 20).trim(); }).filter(Boolean);   // una por captura
     pon("Mercantil Panamá $", mp || ""); pon("IVA cobrado $", iv || ""); pon("Monto Bs", num(c.bsb) || ""); pon("Tasa BCV", Number(c.tbc) > 0 ? Number(c.tbc) : "");
-    pon("Fecha del pago", fp ? "'" + fp : ""); pon("Cuenta destino", ct === "?" ? "no reconocida" : ct); pon("Destino leído", cd); pon("Lectura", tx(c.lx, 160));
+    pon("Fecha del pago", fp ? "'" + fp : ""); pon("Cuenta destino", cts.map(function (x) { return x === "?" ? "no reconocida" : x; }).join(", ")); pon("Destino leído", cd); pon("Lectura", tx(c.lx, 300));
     pon("Cuenta Holded", cuentaHolded(ef, us, ze, mp, bs - iv, !!fac0));
-    if (ct === "?") avisos.push("La captura no muestra una cuenta de la empresa" + (cd ? " (" + cd + ")" : ""));
-    var rfn = refNorm(c.rf);
-    if (rfn.length >= 6) filas.forEach(function (f) { if (f.estado !== "anulado" && refNorm(f.ref) === rfn) avisos.push("Referencia repetida: ya está en el recibo " + f.recibo + " (" + f.vendedor + ", nota " + f.nota + ")"); });
+    if (cts.indexOf("?") >= 0) avisos.push("La captura no muestra una cuenta de la empresa" + (cd ? " (" + cd + ")" : ""));
+    var refsDe = function (t) { return String(t || "").split("·").map(refNorm).filter(function (x) { return x.length >= 6; }); }, mias = refsDe(c.rf);
+    if (mias.length) filas.forEach(function (f) { if (f.estado !== "anulado" && refsDe(f.ref).some(function (x) { return mias.indexOf(x) >= 0; })) avisos.push("Referencia repetida: ya está en el recibo " + f.recibo + " (" + f.vendedor + ", nota " + f.nota + ")"); });
     if (avisos.length) pon("Avisos", avisos.join(" · "));
     if (ab < 0.01 && iv > 0) { pon("Estado", "confirmado"); pon("Observación", "Solo IVA: no se registra en Holded"); pon("Confirmado el", fecha(ahora.toISOString())); pon("Confirmado ts", Math.floor(ahora.getTime() / 1000)); }   // nada que conciliar
     var fac = fcDeTags(nota.tags); if (fac) pon("Factura", "'" + fac[0]);   // el pago de una nota facturada se registra con su número de factura
@@ -171,11 +172,13 @@ function recibosDe(tag) {
 function capturaVer(tag, q) {
   var rec = String(q.r || ""), id = String(q.id || ""), f = leerCobros(hojaCobros()).filter(function (x) { return tag === null ? x.uid === id : x.recibo === rec && x.tag === tag; })[0];
   if (!f) return { estado: "error", msg: "No encontré ese recibo" };
-  var m = /\/d\/([A-Za-z0-9_-]+)/.exec(f.cap) || /[?&]id=([A-Za-z0-9_-]+)/.exec(f.cap);
+  var links = capLinks(f.cap), u = links[Math.max(0, Number(q.i) || 0)] || "";
+  var m = /\/d\/([A-Za-z0-9_-]+)/.exec(u) || /[?&]id=([A-Za-z0-9_-]+)/.exec(u);
   if (!m) return { estado: "error", msg: "Este recibo no tiene captura guardada" };
   var blob = DriveApp.getFileById(m[1]).getBlob();
-  return { estado: "ok", tipo: blob.getContentType(), b64: Utilities.base64Encode(blob.getBytes()) };
+  return { estado: "ok", tipo: blob.getContentType(), b64: Utilities.base64Encode(blob.getBytes()), n: links.length };
 }
+function capLinks(s) { return String(s || "").split(" · ").filter(function (x) { return /^https?:/.test(x); }); }
 // El vendedor avisa a administración de un cobro con diferencia: queda anotado en la hoja y le llega un correo a Mango (una vez cada 6 horas por recibo).
 function cobroAvisar(tag, q) {
   var rec = String(q.r || ""), lock = LockService.getScriptLock(); lock.waitLock(25000);
@@ -192,7 +195,7 @@ function cobroAvisar(tag, q) {
   } finally { lock.releaseLock(); }
 }
 function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, mp: f.mp, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos, dd: f.dd, bv: f.bv || (f.bv === 0 && f.iv ? 0 : null), tb: f.tarifa === "BCV" ? "b" : "", fa: f.fa || "",
-  iv: f.iv, bsb: f.bsb, tbc: f.tbc, fp: f.fp, ct: f.ct, cap: f.cap ? 1 : 0, av: f.av,
+  iv: f.iv, bsb: f.bsb, tbc: f.tbc, fp: f.fp, ct: f.ct, cap: capLinks(f.cap).length, av: f.av,
   tsc: f.tsc || 0, ch: f.ch, cr: f.cr, dif: f.rva ? "" : f.dif, avv: f.avv, ad: f.org === "admin" ? 1 : 0 }; }   // diferencia que administración dejó como está: ya no se marca
 /* fecha aaaa-mm-dd de una celda (texto o fecha de la hoja) */
 function ymd(v) { if (v instanceof Date) return Utilities.formatDate(v, "America/Caracas", "yyyy-MM-dd"); var s = String(v || "").replace(/^'/, ""); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ""; }
@@ -602,11 +605,14 @@ function capturaGuardar(b) {
     var esAdm = !!ADMIN && String(b.k || "") === ADMIN;
     var hoja = hojaCobros(), f = leerCobros(hoja).filter(function (x) { return x.uid === uid && (x.tag === tag || esAdm); })[0];
     if (!f) return { estado: "error", msg: "No encontré el cobro" };                      // aún no llega: el teléfono lo intenta luego
-    if (f.cap) return { estado: "ok", repetido: true };
-    var nombre = "Captura_" + f.recibo + "_" + f.nota + "_" + fcTxt(f.cliente, 40).replace(/[^\wÁÉÍÓÚÑáéíóúñ .-]/g, "") + "_" +
+    var i = Math.max(0, Math.min(3, Number((b.x || {}).i) || 0)), links = String(f.cap || "").split(" · ");   // varias capturas: un enlace por posición
+    if (/^https?:/.test(links[i] || "")) return { estado: "ok", repetido: true };
+    var nombre = "Captura_" + f.recibo + (i ? "_" + (i + 1) : "") + "_" + f.nota + "_" + fcTxt(f.cliente, 40).replace(/[^\wÁÉÍÓÚÑáéíóúñ .-]/g, "") + "_" +
       Utilities.formatDate(new Date(), "America/Caracas", "yyyy-MM-dd_HHmm") + "." + ext;
     var arch = capCarpeta().createFile(Utilities.newBlob(bytes, tipo, nombre));
-    escribir(hoja, f.fila, { "Captura": arch.getUrl() });
+    for (var j = 0; j < i; j++) if (!links[j]) links[j] = "-";
+    links[i] = arch.getUrl();
+    escribir(hoja, f.fila, { "Captura": links.join(" · ") });
     return { estado: "ok" };
   } finally { lock.releaseLock(); }
 }

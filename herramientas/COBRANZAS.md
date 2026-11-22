@@ -93,3 +93,9 @@ El receptor devuelve en cada cobro `pg` (ids de los pagos de Holded con que se c
 - Columnas nuevas al final de Cobros: `Origen`, `Registro Holded`, `Revisión admin`. `refrescar_datos.py` agrega `ntar` (tarifa de las notas con saldo o pagos en 150 días) solo a los datos de Mango.
 - Pruebas: `receptor_admin.js` (Holded simulado con pagos: registro, ya registrado, pago raro, a medias, cobro A-, diferencias, carpeta) y `e2e_admin.py` (Chrome, claro y oscuro).
 
+## Formulario de cobro más claro y varias capturas (22 nov 2026, tarde)
+- **Un solo mensaje arriba**: «Adjunta las capturas de los pagos (Zelle, Binance, pago móvil, transferencia): la app llena los montos. Lo que no tenga captura, como el efectivo, escríbelo tú…».
+- **Varias capturas por cobro** (hasta 4; se pueden elegir varias de una vez): cada una se lee aparte; las formas de pago que traen se llenan con la **suma** de sus montos (dos Zelle se suman), el efectivo y lo que no tenga captura no se toca. «Quitar esta captura» recalcula. La fecha del pago es la de la captura en bolívares (fija la tasa) o la más reciente; las referencias se juntan con « · ». Aviso si dos capturas parecen la misma.
+  Se suben todas: `{a:"cap", x:{id, i}}`; la columna «Captura» guarda los enlaces separados por « · » (posición = número de captura); `a=captura&i=` / `a=adcap&i=` devuelven la que se pide y cuántas hay (`n`); `cap` en la vista = cuántas hay. «Cuenta destino» guarda una cuenta por captura; la referencia repetida se busca en cada referencia por separado.
+- **Bolívares**: en la nota BCV el campo se llama «Bolívares tasa BCV (monto en $)» y debajo, «¿Tienes el monto en Bs?» (Bs, tasa BCV automática por fecha, fecha). En la nota en dólares ya no hay campo suelto de bolívares: el desplegable «+ Nota en USD / pago en Bs» abre Monto en Bs, **Tasa acordada (obligatoria)** con el botón «Usar la tasa BCV (…)», «Equivale en $» y la fecha; «Quitar» lo cierra.
+
