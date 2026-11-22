@@ -33,18 +33,24 @@ const cbCliente = id => { const c = (S.clientes || []).find(x => x.id === id); r
 /* IVA ya cobrado de una nota facturada (cobros no anulados) y lo que falta: el IVA no va a Holded, solo se lleva aquí */
 const cbIvaRec = n => r2(cbCobros().filter(c => c.n === n.id && c.est !== "anulado" && c.est !== "rechazo").reduce((s, c) => s + (Number(c.iv) || 0), 0));
 const cbIvaPend = n => !n || !n.fac ? 0 : Math.max(0, r2(cbIvaT(n) - cbIvaRec(n)));
-/* ¿qué pasó con el IVA tras este cobro? Compara el IVA que ha entrado con el que corresponde al neto ya cubierto.
-   Devuelve { rt: 0 | 75 | 100 | null, txt } o null si no hay nada que decir. */
+/* IVA de una nota facturada. El neto se cubre primero; lo que entra después (en bolívares) es IVA. Mientras el IVA no esté resuelto
+   (completo, o lo recibido + la retención marcada = IVA de la factura) la nota sigue abierta para más pagos, aunque Holded ya tenga el neto. */
+const cbIvaTol = n => Math.max(0.5, r2(cbIvaT(n) * 0.03));
+function cbIvaFalta(n){
+  if(!n || !n.fac) return 0; const t = cbIvaT(n), rt = (cbRet(n) || {}).rt || 0;
+  return Math.max(0, r2(t - cbIvaRec(n) - t * rt / 100));
+}
+/* ¿qué pasó con el IVA tras este cobro? Solo se concluye cuando lo recibido cuadra con un caso claro; si no, el IVA queda "parcial" y la nota abierta.
+   Devuelve { est: completo | r75 | sinIva | parcial, rt: 0 | 75 | null, txt } o null mientras el neto no esté completo. */
 function cbIvaDetecta(n, saldoAntes, c){
-  if(!n || !n.fac || !(c.iv > 0 || c.bv > 0)) return null;
-  const queda = Math.max(0, r2(saldoAntes - c.bv)), cubierto = r2(cbNeto(n) - queda), esper = r2(cubierto * cbIvaR(n)), rec = r2(cbIvaRec(n) + (c.iv || 0));
+  if(!n || !n.fac) return null;
+  const queda = Math.max(0, r2(saldoAntes - c.bv)); if(queda >= 0.01) return null;          // el neto aún no está completo: todo lo que entra es neto
+  const esper = cbIvaT(n), rec = r2(cbIvaRec(n) + (c.iv || 0)), tol = cbIvaTol(n);
   if(esper < 0.5) return null;
-  const q = rec / esper;
-  if(q >= 0.97) return { rt:0, txt:"Entró el IVA completo." };
-  if(q >= 0.22 && q <= 0.28) return { rt:75, txt:"Entró solo el 25 % del IVA: el cliente retuvo el 75 %. Falta el comprobante de retención." };
-  if(q <= 0.03 && queda < 0.01) return { rt:100, txt:"No entró IVA con el pago: quedó marcada retención 100 %. Falta el comprobante. Si el cliente paga el IVA después, cámbialo." };
-  if(c.iv > 0) return { rt:null, txt:"El IVA no llegó completo: entraron " + cbM(rec, n) + " de " + cbM(esper, n) + ". Revisa con el cliente si retuvo o si falta un pago." };
-  return null;
+  if(rec >= esper - tol) return { est:"completo", rt:0, txt:"Entró el IVA completo." };
+  if(Math.abs(rec - esper * 0.25) <= tol) return { est:"r75", rt:75, txt:"Entró el 25 % del IVA (" + cbM(rec, n) + "): el cliente retuvo el 75 %. Falta el comprobante de retención. Si en realidad va a pagar el resto del IVA, cámbialo a «No retiene» y anótalo cuando llegue." };
+  if(rec < 0.01) return { est:"sinIva", rt:null, txt:"El neto está completo y no entró IVA. Si el cliente retuvo el 100 %, márcalo en la nota; si va a pagar el IVA aparte, la nota sigue abierta para anotarlo." };
+  return { est:"parcial", rt:null, txt:"Van " + cbM(rec, n) + " de IVA de " + cbM(esper, n) + ". Faltan " + cbM(r2(esper - rec), n) + (rec < esper * 0.25 - tol ? ", o " + cbM(r2(esper * 0.25 - rec), n) + " si el cliente retiene el 75 %" : "") + ". La nota sigue abierta para el próximo pago." };
 }
 /* tasa BCV (Bs por dólar) vigente en una fecha aaaa-mm-dd: la última publicada con fecha valor igual o anterior. CB.tasas = [[fecha, tasa]] del receptor */
 function cbTasaDe(f){
@@ -273,7 +279,8 @@ function cbVence(n){
 }
 const cbVTxt = d => d == null ? "" : d < 0 ? "Vencida hace " + (-d) + (d === -1 ? " día" : " días") : d === 0 ? "Vence hoy" : "Vence en " + d + (d === 1 ? " día" : " días");
 const cbFecha = s => s ? cbDia(s).toLocaleDateString("es-VE", { day:"2-digit", month:"short" }) : "";
-const cbRows = () => cbNotas().map(n => Object.assign({ n, d:cbVence(n) }, cbVisible(n))).filter(x => x.n.pend >= 0.01 && (x.saldo >= 0.01 || x.pc >= 0.01));
+const cbRows = () => cbNotas().map(n => { const x = Object.assign({ n, d:cbVence(n) }, cbVisible(n)); x.ivaF = n.fac && x.saldo < 0.01 ? cbIvaFalta(n) : 0; return x; })
+  .filter(x => (x.n.pend >= 0.01 && (x.saldo >= 0.01 || x.pc >= 0.01)) || x.ivaF >= cbIvaTol(x.n));
 function cobBadge(){
   const b = $("cobN"); if(!b) return; cbLoad();
   const v = cbRows().filter(x => x.d != null && x.d < 0 && x.saldo >= 0.01).length;
@@ -332,7 +339,7 @@ function cbPendHtml(){
     h += `<section class="cbg"><div class="cbh"><b>${esc(cbCliente(id))}</b><span class="bs num">${money(sum(rows))}</span></div>` + rows.map(x => {
       const vc = x.d != null && x.d < 0;
       return `<div class="cbw"><button class="cbr" data-cb="open" data-id="${esc(x.n.id)}"><span><span class="n bs">${esc(x.n.num)}</span> ${x.n.tar === "b" ? `<span class="tg">BCV</span>` : ""}${x.n.fac ? ` <span class="tg fa">FACTURA ${esc(x.n.fac[0])}</span>` : ""}<br><small>${esc(cbFecha(x.n.fecha))}${x.d != null ? " · " : ""}<span class="${vc ? "ven" : ""}">${esc(cbVTxt(x.d))}</span></small></span>
-        <span class="r"><span class="s bs num">${money(x.saldo)}</span>${esB(x.n) || x.n.fac ? `<br><small class="tb">${[esB(x.n) ? "tasa BCV" : "", x.n.fac ? "neto" : ""].filter(Boolean).join(" · ")}</small>` : ""}${x.pc >= 0.01 ? `<br><small class="pc">Abono por confirmar ${money(x.pc)}</small>` : ""}</span></button>${cbFilaAcc(x.n, x.saldo)}</div>`;
+        <span class="r"><span class="s bs num">${money(x.saldo)}</span>${esB(x.n) || x.n.fac ? `<br><small class="tb">${[esB(x.n) ? "tasa BCV" : "", x.n.fac ? "neto" : ""].filter(Boolean).join(" · ")}</small>` : ""}${x.pc >= 0.01 ? `<br><small class="pc">Abono por confirmar ${money(x.pc)}</small>` : ""}${x.ivaF >= 0.01 ? `<br><small class="pc">Falta IVA ${cbM(x.ivaF, x.n)}</small>` : ""}</span></button>${cbFilaAcc(x.n, x.saldo)}</div>`;
     }).join("") + `</section>`;
   });
   return h + `<p class="hint">${CB.vivo ? "Saldos de Holded al momento" : "Saldos de Holded al " + (S.fecha ? esc(new Date(S.fecha).toLocaleString("es-VE", { day:"2-digit", month:"short", hour:"numeric", minute:"2-digit" })) : "último refresco")}${CB.sync ? " · " + esc(CB.sync) : ""}. Lo que cobres hoy aparece como «abono por confirmar» hasta que administración lo registre.</p>`;
@@ -416,7 +423,7 @@ function cbSum(){
       `<div><span>Abona a la nota</span><b class="num">${cbM(c.bv, n)}</b></div><div class="big"><span>Quedaría por cobrar</span><b class="bs num">${cbM(Math.max(0, resto), n)}</b></div>`
     : `<div><span>Cobrado</span><b class="num">${money(c.nom)}</b></div><div class="big"><span>Quedaría por cobrar</span><b class="bs num">${money(Math.max(0, resto))}</b></div>`;
   if(n.fac && c.iv > 0){ const det = cbIvaDetecta(n, x.saldo, c);
-    s.innerHTML = s.innerHTML.replace('<div class="big">', `<div><span>IVA recibido (no va a Holded)</span><b class="num">${cbM(c.iv, n)}</b></div>` + (det ? `<div><span>${det.rt === 75 || det.rt === 100 ? "Retención detectada" : "IVA"}</span><b class="num">${det.rt === 75 || det.rt === 100 ? det.rt + " %" : det.rt === 0 ? "completo" : "incompleto"}</b></div>` : "") + `<div class="big">`); }
+    s.innerHTML = s.innerHTML.replace('<div class="big">', `<div><span>IVA recibido (no va a Holded)</span><b class="num">${cbM(c.iv, n)}</b></div>` + (det ? `<div><span>${det.est === "r75" ? "Retención detectada" : "IVA"}</span><b class="num">${det.est === "r75" ? "75 %" : det.est === "completo" ? "completo" : det.est === "sinIva" ? "no entró" : "parcial"}</b></div>` : "") + `<div class="big">`); }
   else if(n.fac && c.bv > 0){ const iv = cbIvaDe(n, c.bv);
     s.innerHTML = s.innerHTML.replace('<div class="big">', `<div><span>IVA ${IVAP} % aparte</span><b class="num">${cbM(iv.iva, n)}</b></div>` + (iv.rt ? `<div><span>Retención ${iv.rt} % del IVA</span><b class="num">−${cbM(iv.ret, n)}</b></div>` : "") +
       `<div><span>IVA que paga el cliente</span><b class="num">${cbM(iv.paga, n)}</b></div><div class="big">`); }
@@ -539,7 +546,7 @@ async function cbGuardar(){
   if(r.ok){ cobro = r.cobro; cbCambioRec(o, cobro); cbMerge(cobro); } else { cobro = o; CB.cola.push(o); cbSave(); }
   if(cap && cap.f) cbCapGuarda(o.id, cobro.rec, cap.f);                                   // la captura se sube aparte, sin hacer esperar el recibo
   if(det){ CB.avisos.push("Nota " + x.n.num + ": " + det.txt);                                 // IVA: completo, retención 75/100 o incompleto
-    if(det.rt != null && det.rt !== ((cbRet(x.n) || {}).rt || 0)) cbRetSet(x.n.id, det.rt, null); }
+    if((det.est === "completo" || det.est === "r75") && det.rt !== ((cbRet(x.n) || {}).rt || 0)) cbRetSet(x.n.id, det.rt, null); }
   if(CB.cap && CB.cap.url) URL.revokeObjectURL(CB.cap.url);
   CB.f = cbF0(); CB.cap = null; CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; CB.nota = null; CB.ok = { cobro }; cobRender(); cobBadge(); window.scrollTo(0, 0);
 }
@@ -586,7 +593,8 @@ async function cbShare(id){
 /* debajo de cada nota de la lista: su estado de factura y el botón para pedirla */
 function cbFilaAcc(n, saldo){
   const s = cbSolDe(n);
-  if(n.fac){ const ip = cbIvaDe(n, saldo), rt = ip.rt;
+  if(n.fac){ const ip = cbIvaDe(n, saldo), rt = ip.rt, f = saldo < 0.01 ? cbIvaFalta(n) : 0;
+    if(saldo < 0.01) return `<div class="cbx"><small>Neto cobrado · ${f >= 0.01 ? "falta IVA <b class=\"num\">" + cbM(f, n) + "</b>" : "IVA resuelto"}${rt ? " · retiene " + rt + " %" : ""}</small><button class="mini" data-cb="open" data-id="${esc(n.id)}">${f >= 0.01 ? "Anotar IVA" : "Ver"}</button></div>`;
     return `<div class="cbx"><small>IVA aparte: <b class="num">${cbM(ip.iva, n)}</b>${rt ? " · retiene " + rt + " %" : ""}</small><button class="mini" data-cb="open" data-id="${esc(n.id)}">${rt ? "Retención" : "IVA y retención"}</button></div>`; }
   if(s) return `<div class="cbx"><span class="st low">Factura solicitada</span><button class="mini" data-cb="facnew" data-id="${esc(n.id)}">Ver o cambiar</button></div>`;
   if(!esB(n)) return "";   // la factura legal solo se pide para notas emitidas en BCV
@@ -605,7 +613,8 @@ function cbFacBox(n, x){
   const rr = cbRet(n) || {}, rt = rr.rt || 0, ip = cbIvaDe(n, x.saldo), cp = rt ? rr.cp || "" : "", chip = (k, l, cur, at) => `<button data-cb="${at}" data-id="${esc(n.id)}" data-k="${k}" aria-pressed="${cur === k}">${l}</button>`;
   return `<div class="box"><span class="lbl">Factura AdriMan ${esc(n.fac[0])}</span>
     <p class="hint">Nota facturada: el monto a cobrar es el neto. El IVA lo paga el cliente aparte.</p>
-    <div class="cbsum"><div><span>Neto que falta</span><b class="num">${cbM(x.saldo, n)}</b></div><div><span>IVA ${IVAP} % de lo que falta</span><b class="num">${cbM(ip.iva, n)}</b></div>` +
+    <div class="cbsum"><div><span>Neto que falta</span><b class="num">${cbM(x.saldo, n)}</b></div>${x.saldo >= 0.01 ? `<div><span>IVA ${IVAP} % de lo que falta</span><b class="num">${cbM(ip.iva, n)}</b></div>` : ""}` +
+    (cbIvaRec(n) >= 0.01 || x.saldo < 0.01 ? `<div><span>IVA de la factura</span><b class="num">${cbM(cbIvaT(n), n)}</b></div><div><span>IVA ya recibido</span><b class="num">${cbM(cbIvaRec(n), n)}</b></div><div><span>IVA que falta${rt ? " (con la retención)" : ""}</span><b class="num">${cbM(cbIvaFalta(n), n)}</b></div>` : "") +
     (rt ? `<div><span>Retención ${rt} % del IVA</span><b class="num">−${cbM(ip.ret, n)}</b></div><div class="big"><span>IVA que paga el cliente</span><b class="bs num">${cbM(ip.paga, n)}</b></div>` : "") + `</div>
     <span class="lbl">¿El cliente retiene IVA?</span>
     <div class="seg" role="group" aria-label="Retención de IVA">${chip(0, "No retiene", rt, "ret")}${chip(75, "Retiene 75 %", rt, "ret")}${chip(100, "Retiene 100 %", rt, "ret")}</div>` +

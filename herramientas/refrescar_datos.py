@@ -62,10 +62,11 @@ def factura(tags):
     return [f, iva] if f else None
 tagcl = {x['id']: ((x.get('tags') or [''])[0] or '') for x in conts}
 corte = datetime.datetime.now().timestamp() - 21 * 86400; nt = {}
+corteFac = datetime.datetime.now().timestamp() - 90 * 86400   # notas con factura AdriMan: el IVA puede llegar después del neto (la app las deja abiertas hasta resolverlo)
 for n in notas:
     if n.get('draft') or not n.get('docNumber'): continue
     pen, pag = round(float(n.get('paymentsPending') or 0), 2), [[y.get('id'), round(float(y.get('amount') or 0), 2), y.get('date')] for y in (n.get('paymentsDetail') or [])]
-    if pen < 0.01 and not (pag and max(y[2] or 0 for y in pag) >= corte): continue
+    if pen < 0.01 and not (pag and max(y[2] or 0 for y in pag) >= (corteFac if factura(n.get('tags')) else corte)): continue
     t, d = tarifa(n), float(n.get('discount') or 0)
     real = round(pen * FBCV, 2) if t == 'b' and d == 0 else pen
     bcv = (round(pen / (1 - d / 100), 2) if d > 0 else pen) if t == 'b' else None   # lo que falta en dólares a tasa BCV
