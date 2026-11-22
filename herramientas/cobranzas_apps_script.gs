@@ -13,7 +13,9 @@
 var COB_COLS = ["Recibo", "Fecha", "Vendedor", "Cliente", "Nota", "Cobrado $", "Abono real $", "Efectivo $", "USDT $", "Zelle $", "Bs (en $)", "Tasa", "Referencia",
   "Estado", "Observación", "Confirmado el", "ts", "tag", "notaId", "uid", "base", "pagos", "dispositivo",
   "Tarifa", "Desc. divisas %", "Abono a la nota $", "Factura",    // columnas nuevas al final (nov 2026): BCV o USD, descuento por pago en divisas, abono en dólares de la nota, factura AdriMan de la nota
-  "Mercantil Panamá $", "IVA cobrado $", "Monto Bs", "Tasa BCV", "Fecha del pago", "Cuenta destino", "Destino leído", "Cuenta Holded", "Captura", "Lectura", "Avisos"];
+  "Mercantil Panamá $", "IVA cobrado $", "Monto Bs", "Tasa BCV", "Fecha del pago", "Cuenta destino", "Destino leído", "Cuenta Holded", "Captura", "Lectura", "Avisos",
+  "Confirmado ts", "Cuenta real Holded", "Diferencia", "Aviso del vendedor"];
+// (22 nov 2026, parte 2) cuándo se confirmó (para la ventana de la semana), en qué cuenta(s) de Holded quedó de verdad, si no coincide con la del recibo, y cuándo avisó el vendedor
 // (22 nov 2026) captura del pago: lo que leyó el teléfono, la cuenta de la empresa a la que se pagó, el IVA que vino con el pago (no va a Holded)
 // y la cuenta de Holded donde debe registrarse cada forma de pago. Las columnas de antes no se mueven.
 var CUENTA_HOLDED = { ef: "CAJA CHICA", us: "USDT", ze: "NUEVO ZELLE", mp: "MERCANTIL PANAMÁ", bs: "Caja para Operaciones en Tránsito", bsFac: "Bolivares Cuenta Juridica" };
@@ -30,7 +32,7 @@ function descuentoBcv() {
 var COB = {}; COB_COLS.forEach(function (c, i) { COB[c] = i; });
 
 // Rutas de cobranzas y facturas. En el receptor, doGet las enruta con: if (esCobranzas(q.a)) return json(cobranzas(q));
-var COB_ACC = { cobro: 1, cobros: 1, anular: 1, solfac: 1, solcancel: 1, ret: 1, adm: 1, admacc: 1 };
+var COB_ACC = { cobro: 1, cobros: 1, anular: 1, solfac: 1, solcancel: 1, ret: 1, adm: 1, admacc: 1, recibos: 1, captura: 1, avisar: 1 };
 function esCobranzas(a) { return COB_ACC.hasOwnProperty(String(a || "")); }
 function cobranzas(q) {
   try {
@@ -42,6 +44,9 @@ function cobranzas(q) {
     if (q.a === "solfac") return fcSolicitar(tag, q);
     if (q.a === "solcancel") return fcCancelar(tag, q);
     if (q.a === "ret") return fcRetencion(tag, fcLee(q.x), "");
+    if (q.a === "recibos") return { estado: "ok", cobros: recibosDe(tag) };       // archivo de 3 meses («Mis recibos»)
+    if (q.a === "captura") return capturaVer(tag, q);
+    if (q.a === "avisar") return cobroAvisar(tag, q);
     var vivo = null; try { vivo = saldosVivos(q.ids); } catch (e2) {}          // si Holded falla, los cobros se devuelven igual
     var fx = { sol: [], ret: {} }; try { fx = fcDelVendedor(tag); } catch (e3) {}
     var tasas = []; try { tasas = tasasRecientes(); } catch (e4) {}
@@ -118,7 +123,7 @@ function cobroNuevo(tag, q) {
     var rfn = refNorm(c.rf);
     if (rfn.length >= 6) filas.forEach(function (f) { if (f.estado !== "anulado" && refNorm(f.ref) === rfn) avisos.push("Referencia repetida: ya está en el recibo " + f.recibo + " (" + f.vendedor + ", nota " + f.nota + ")"); });
     if (avisos.length) pon("Avisos", avisos.join(" · "));
-    if (ab < 0.01 && iv > 0) { pon("Estado", "confirmado"); pon("Observación", "Solo IVA: no se registra en Holded"); pon("Confirmado el", fecha(ahora.toISOString())); }   // nada que conciliar
+    if (ab < 0.01 && iv > 0) { pon("Estado", "confirmado"); pon("Observación", "Solo IVA: no se registra en Holded"); pon("Confirmado el", fecha(ahora.toISOString())); pon("Confirmado ts", Math.floor(ahora.getTime() / 1000)); }   // nada que conciliar
     var fac = fcDeTags(nota.tags); if (fac) pon("Factura", "'" + fac[0]);   // el pago de una nota facturada se registra con su número de factura
     pon("dispositivo", corto(String(q.d || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 40)));
     hoja.appendRow(fila);
@@ -139,12 +144,43 @@ function cobroAnular(tag, q) {
   } finally { lock.releaseLock(); }
 }
 // Lo que ve el vendedor: todo lo pendiente, y lo confirmado o anulado de los últimos 7 días.
+// La semana se cuenta desde que se confirmó (o anuló), no desde que se anotó el cobro.
 function cobrosDe(tag) {
   var corte = Date.now() / 1000 - 7 * 86400;
-  return leerCobros(hojaCobros()).filter(function (f) { return f.tag === tag && (f.estado === "cobrado" || f.estado === "revisar" || f.ts >= corte); }).map(vista);
+  return leerCobros(hojaCobros()).filter(function (f) { return f.tag === tag && (f.estado === "cobrado" || f.estado === "revisar" || (f.tsc || f.ts) >= corte); }).map(vista);
+}
+// Archivo de 3 meses del vendedor: todos sus cobros (menos los anulados) de los últimos 90 días, y los pendientes sin importar la edad.
+function recibosDe(tag) {
+  var corte = Date.now() / 1000 - 90 * 86400;
+  return leerCobros(hojaCobros()).filter(function (f) { return f.tag === tag && f.estado !== "anulado" && (f.estado === "cobrado" || f.estado === "revisar" || f.ts >= corte); }).map(vista);
+}
+// Captura de un recibo (Drive pide iniciar sesión; el vendedor la ve a través del receptor). Devuelve la imagen en base64.
+function capturaVer(tag, q) {
+  var rec = String(q.r || ""), f = leerCobros(hojaCobros()).filter(function (x) { return x.recibo === rec && x.tag === tag; })[0];
+  if (!f) return { estado: "error", msg: "No encontré ese recibo" };
+  var m = /\/d\/([A-Za-z0-9_-]+)/.exec(f.cap) || /[?&]id=([A-Za-z0-9_-]+)/.exec(f.cap);
+  if (!m) return { estado: "error", msg: "Este recibo no tiene captura guardada" };
+  var blob = DriveApp.getFileById(m[1]).getBlob();
+  return { estado: "ok", tipo: blob.getContentType(), b64: Utilities.base64Encode(blob.getBytes()) };
+}
+// El vendedor avisa a administración de un cobro con diferencia: queda anotado en la hoja y le llega un correo a Mango (una vez cada 6 horas por recibo).
+function cobroAvisar(tag, q) {
+  var rec = String(q.r || ""), lock = LockService.getScriptLock(); lock.waitLock(25000);
+  try {
+    var hoja = hojaCobros(), f = leerCobros(hoja).filter(function (x) { return x.recibo === rec && x.tag === tag; })[0];
+    if (!f) return { estado: "error", msg: "No encontré ese recibo" };
+    var ahora = new Date();
+    if (!f.avv || !(Date.now() - (f.avvTs || 0) * 1000 < 6 * 3600000)) {
+      escribir(hoja, f.fila, { "Aviso del vendedor": fecha(ahora.toISOString()) + " |" + Math.floor(ahora.getTime() / 1000) });
+      aviso("cobro con diferencia: " + f.recibo, f.vendedor + " avisa que el recibo " + f.recibo + " (" + f.cliente + ", nota " + f.nota + ", $" + f.nominal.toFixed(2) + ") tiene una diferencia.\n\n" +
+        (f.dif ? f.dif + "\n\n" : "") + (f.obs ? f.obs + "\n\n" : "") + "Hoja: " + hoja.getParent().getUrl());
+    }
+    return { estado: "ok", avv: fecha(ahora.toISOString()) };
+  } finally { lock.releaseLock(); }
 }
 function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, mp: f.mp, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos, dd: f.dd, bv: f.bv || (f.bv === 0 && f.iv ? 0 : null), tb: f.tarifa === "BCV" ? "b" : "", fa: f.fa || "",
-  iv: f.iv, bsb: f.bsb, tbc: f.tbc, fp: f.fp, ct: f.ct, cap: f.cap ? 1 : 0, av: f.av }; }
+  iv: f.iv, bsb: f.bsb, tbc: f.tbc, fp: f.fp, ct: f.ct, cap: f.cap ? 1 : 0, av: f.av,
+  tsc: f.tsc || 0, ch: f.ch, cr: f.cr, dif: f.dif, avv: f.avv }; }
 /* fecha aaaa-mm-dd de una celda (texto o fecha de la hoja) */
 function ymd(v) { if (v instanceof Date) return Utilities.formatDate(v, "America/Caracas", "yyyy-MM-dd"); var s = String(v || "").replace(/^'/, ""); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ""; }
 
@@ -152,16 +188,16 @@ function ymd(v) { if (v instanceof Date) return Utilities.formatDate(v, "America
    { id: [total, pagado, pendiente, descuento %, [[idPago, monto, fecha]], [factura, iva] | null] }. Así una nota cobrada en administración deja de salirle
    como pendiente al vendedor sin esperar al refresco de datos. Se guarda un minuto en memoria para no llamar a Holded en cada toque. */
 function saldosVivos(ids) {
-  var pedidos = String(ids || "").split(",").filter(function (x) { return /^[a-f0-9]{24}$/.test(x); }).slice(0, 80);
+  var pedidos = String(ids || "").split(",").filter(function (x) { return /^[a-f0-9]{24}$/.test(x); }).slice(0, 90);
   if (!pedidos.length) return {};
   var cache = CacheService.getScriptCache(), raw = cache.get("COB_NT"), mapa;
   if (raw) mapa = JSON.parse(raw);
   else {
-    mapa = {};
+    mapa = {}; var ctas = cuentasHolded();
     for (var p = 1; p <= 6; p++) {
       var docs = holded("documents/invoice?page=" + p); if (!docs.length) break;
       docs.forEach(function (d) {
-        var pagos = (d.paymentsDetail || []).map(function (y) { return [y.id, Math.round(Number(y.amount) * 100) / 100, y.date]; });
+        var pagos = (d.paymentsDetail || []).map(function (y) { var c = ctas[y.bankId]; return [y.id, Math.round(Number(y.amount) * 100) / 100, y.date, c ? c[0] : "", c && c[1] ? 1 : 0]; });   // [id, monto, fecha, cuenta, archivada]
         var hace = Date.now() / 1000 - 30 * 86400, reciente = pagos.some(function (y) { return y[2] >= hace; });
         if ((Number(d.paymentsPending) || 0) >= 0.01 || reciente) mapa[d.id] = [Number(d.total) || 0, Number(d.paymentsTotal) || 0, Number(d.paymentsPending) || 0, Number(d.discount) || 0, pagos, fcDeTags(d.tags)];
       });
@@ -188,17 +224,94 @@ function conciliarCobros() {
         grupo.map(function (f) { return { id: f.uid, fecha: f.ts, abono: f.abono, bs: f.bs > 0, base: f.base, estado: f.estado, pagos: f.pagos, obs: f.obs }; }), ahora);
       cambios.forEach(function (c) {
         var f = grupo.filter(function (x) { return x.uid === c.id; })[0], v = { "Estado": c.estado, "Observación": c.obs };
-        if (c.estado === "confirmado") { v["pagos"] = JSON.stringify(c.pagos); v["Confirmado el"] = fecha(new Date().toISOString()); hechos++; }
+        if (c.estado === "confirmado") {
+          v["pagos"] = JSON.stringify(c.pagos); v["Confirmado el"] = fecha(new Date().toISOString()); v["Confirmado ts"] = ahora; hechos++;
+          try { var cu = cuentasReales(Object.assign({}, f, { pagos: c.pagos }), nota); v["Cuenta real Holded"] = cu.txt || "sin pago en Holded"; v["Diferencia"] = cu.dif; } catch (e6) {}
+        }
         else avisos.push(f.recibo + " · " + f.vendedor + " · " + f.cliente + " · " + f.nota + " · $" + f.abono.toFixed(2) + "\n   " + c.obs);
         escribir(hoja, f.fila, v);
       });
     });
+    try { cobrosRevisarCuentas(filas); } catch (e7) {}                         // cuenta real en Holded de los cobros ya confirmados (y los que tenían diferencia)
     try { fcMarcarEmitidas(); } catch (e4) {}                                   // solicitudes de factura ya emitidas (etiqueta fac###### en la nota)
     try { tasaBcvAlDia(); } catch (e5) {}                                       // tasa BCV para el portal (cada 3 horas)
     if (avisos.length) aviso("cobros por revisar (" + avisos.length + ")", "Estos cobros anotados por los vendedores no se pudieron confirmar solos contra Holded:\n\n" + avisos.join("\n\n") +
       "\n\nEn la hoja puedes escribir \"confirmado\" o \"anulado\" en la columna Estado para resolverlos a mano:\n" + hoja.getParent().getUrl());
     return hechos + " confirmados, " + avisos.length + " por revisar";
   } finally { lock.releaseLock(); }
+}
+
+/* ---------- cuentas de Holded: en cuál quedó de verdad cada pago ---------- */
+/* Cuentas conocidas (id → [nombre, archivada]). La lista en vivo de Holded se suma encima, así una cuenta nueva aparece sola. Las archivadas
+   (…OLD y el «Nuevo Zelle» viejo) son un error si un pago cae ahí. */
+var CUENTAS_FIJAS = {
+  "6a18ded2e9c8e3e7cd06f561": ["Caja Chica OLD", 1], "6a18df0d8b097bd21e05fd6d": ["USDT OLD", 1], "6a1b66ed75a5d282c8069074": ["Pasarela Sueldos Personal OLD", 1],
+  "6a1f248a6a7381823109271e": ["Nuevo Zelle (archivada)", 1], "6a1f26611ca92927070706f9": ["Caja Tránsito para Bolivares OLD", 1], "6a1f2cf3e3892d37e408122c": ["Pasarela de Sueldos Personal OLD", 1],
+  "6a1f2ef5b509c6643c0c1f86": ["Fondo de Operaciones - Sueldos Personal", 1], "6a1f3179c9574c97db053902": ["Caja Chica OLD", 1], "6a1f33f36588be3343036ba9": ["Mercantil Panama OLD", 1],
+  "6a1f354c40aa1e3d3b04d22d": ["USD Sami Banesco OLD", 1], "6a1f3598f58910876d062391": ["USDT OLD", 1], "6a1ff16ec5f877f61306136f": ["Fondo de Operaciones - Reinhard", 1],
+  "6a21eaccb7dfd73add017db7": ["Caja para Operaciones en Tránsito", 0], "6a21f1483e0218208d0617fc": ["USDT", 0], "6a21f411a4a649295b04885a": ["NUEVO ZELLE", 0], "6a21f48b02f61e3fdd0793bc": ["CAJA CHICA", 0],
+  "6a21f70ee03e72b64706c44b": ["MERCANTIL PANAMÁ", 0], "6a21f7af8052642b7d0e4fe5": ["USD SAMI BANESCO", 0], "6a23f5b686b5b10a5d0be495": ["Caja Socio - Adriana Mujica", 0],
+  "6a23f63fcf4d71b1b5007528": ["Caja Socio - Reinhard Mangado", 0], "6aef84229d87cfc6220ae3e7": ["Fondos apartados - Operaciones en Espera", 0], "6af09d323d3c13c660066e24": ["Por cobrar - Operaciones en Espera", 0],
+  "6af785d7818ea0e4e008b81a": ["Bolivares Cuenta Juridica", 0]
+};
+function cuentasHolded() {
+  var cache = CacheService.getScriptCache(), c = cache.get("COB_CTAS");
+  if (c) return JSON.parse(c);
+  var mapa = JSON.parse(JSON.stringify(CUENTAS_FIJAS));
+  try {
+    (holded("treasury") || []).forEach(function (x) {
+      if (!x || !x.id) return;
+      var nom = String(x.name || ""), fija = CUENTAS_FIJAS[x.id];
+      mapa[x.id] = [fija ? fija[0] : nom, (fija ? fija[1] : (x.archived || /\bOLD\b/i.test(nom) ? 1 : 0)) ? 1 : 0];
+    });
+  } catch (e) {}
+  try { cache.put("COB_CTAS", JSON.stringify(mapa), 21600); } catch (e2) {}
+  return mapa;
+}
+/* «CAJA CHICA» y «Caja Chica NEW» son la misma cuenta: se comparan sin mayúsculas, tildes ni «new» */
+function ctaNorm(s) { return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\bnew\b/g, "").replace(/\s+/g, " ").trim(); }
+/* cuentas de Holded donde debe ir lo que cobró el vendedor (activas; los bolívares de notas con factura van a la jurídica; el IVA no va a Holded) */
+function cuentasEsperadas(f) {
+  var o = []; if (f.ef > 0) o.push(CUENTA_HOLDED.ef); if (f.us > 0) o.push(CUENTA_HOLDED.us); if (f.ze > 0) o.push(CUENTA_HOLDED.ze); if (f.mp > 0) o.push(CUENTA_HOLDED.mp);
+  if (f.bs - f.iv > 0.009) o.push(f.fa ? CUENTA_HOLDED.bsFac : CUENTA_HOLDED.bs);
+  return o;
+}
+/* f = cobro con sus pagos de Holded [[idPago, monto]]; nota = la nota en Holded. Devuelve { txt: "CAJA CHICA $500,00", dif: "" | "Holded: … · tu recibo: …" } */
+function cuentasReales(f, nota) {
+  var mapa = cuentasHolded(), det = {}, por = {}, orden = [], arch = [];
+  (nota.paymentsDetail || []).forEach(function (p) { det[p.id] = p; });
+  (f.pagos || []).forEach(function (u) {
+    var p = det[u[0]]; if (!p) return;
+    var c = mapa[p.bankId] || ["cuenta desconocida", 0], k = c[0];
+    if (!por.hasOwnProperty(k)) { por[k] = 0; orden.push(k); }
+    por[k] += Number(u[1]) || 0; if (c[1] && arch.indexOf(k) < 0) arch.push(k);
+  });
+  var txt = orden.map(function (k) { return k + " $" + (Math.round(por[k] * 100) / 100).toFixed(2).replace(".", ","); }).join(" + ");
+  var esp = cuentasEsperadas(f), real = {}, pedida = {}; orden.forEach(function (k) { real[ctaNorm(k)] = 1; }); esp.forEach(function (k) { pedida[ctaNorm(k)] = 1; });
+  var dif = "";
+  if (arch.length) dif = "Holded lo registró en una cuenta archivada: " + arch.join(" + ");
+  else if (orden.length && esp.length && (esp.some(function (k) { return !real[ctaNorm(k)]; }) || orden.some(function (k) { return !pedida[ctaNorm(k)]; })))
+    dif = "Holded: " + orden.join(" + ") + " · tu recibo: " + esp.join(" + ");
+  return { txt: txt, dif: dif };
+}
+/* Cada hora: los cobros confirmados que aún no tienen su cuenta real (los de antes de este cambio), los que tenían diferencia y los confirmados en los últimos 3 días (por si administración los corrige).
+   Máximo 20 notas por corrida para no pasar del tiempo de Apps Script. */
+function cobrosRevisarCuentas(filas) {
+  var hoja = hojaCobros(), ahora = Date.now() / 1000, grupos = {}, n = 0;
+  filas.forEach(function (f) {
+    if (f.estado !== "confirmado" || f.ts < ahora - 95 * 86400) return;
+    if (!f.pagos.length) { if (!f.cr) escribir(hoja, f.fila, { "Cuenta real Holded": "sin pago en Holded" }); return; }
+    if (f.cr && !(f.dif && f.ts >= ahora - 30 * 86400) && !(f.tsc >= ahora - 3 * 86400)) return;     // sin cuenta real aún · con diferencia reciente · confirmado hace menos de 3 días (administración suele corregir enseguida)
+    (grupos[f.notaId] = grupos[f.notaId] || []).push(f);
+  });
+  Object.keys(grupos).forEach(function (nid) {
+    if (n >= 20) return; n++;
+    var nota; try { nota = holded("documents/invoice/" + nid); } catch (e) { return; }
+    grupos[nid].forEach(function (f) {
+      var cu = cuentasReales(f, nota), nuevo = cu.txt || "sin pago en Holded";
+      if (nuevo !== f.cr || cu.dif !== f.dif) escribir(hoja, f.fila, { "Cuenta real Holded": nuevo, "Diferencia": cu.dif });
+    });
+  });
 }
 
 /* ---------- hoja, Holded e instalación ---------- */
@@ -219,7 +332,9 @@ function leerCobros(hoja) {
       tarifa: String(r[COB["Tarifa"]] || ""), fa: String(r[COB["Factura"]] || ""), dd: N(r[COB["Desc. divisas %"]]), bv: N(r[COB["Abono a la nota $"]]),
       ts: N(r[COB["ts"]]), tag: String(r[COB["tag"]]), notaId: String(r[COB["notaId"]]), uid: String(r[COB["uid"]]), base: J(r[COB["base"]]), pagos: J(r[COB["pagos"]]),
       mp: N(r[COB["Mercantil Panamá $"]]), iv: N(r[COB["IVA cobrado $"]]), bsb: N(r[COB["Monto Bs"]]), tbc: N(r[COB["Tasa BCV"]]), fp: ymd(r[COB["Fecha del pago"]]),
-      ct: String(r[COB["Cuenta destino"]] || ""), ch: String(r[COB["Cuenta Holded"]] || ""), cap: String(r[COB["Captura"]] || ""), av: String(r[COB["Avisos"]] || "") });
+      ct: String(r[COB["Cuenta destino"]] || ""), ch: String(r[COB["Cuenta Holded"]] || ""), cap: String(r[COB["Captura"]] || ""), av: String(r[COB["Avisos"]] || ""),
+      tsc: N(r[COB["Confirmado ts"]]), cr: String(r[COB["Cuenta real Holded"]] || ""), dif: String(r[COB["Diferencia"]] || ""),
+      avv: String(r[COB["Aviso del vendedor"]] || "").split(" |")[0], avvTs: N(String(r[COB["Aviso del vendedor"]] || "").split(" |")[1]) });
   }
   return out;
 }

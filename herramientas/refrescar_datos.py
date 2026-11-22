@@ -20,6 +20,9 @@ def todo(ruta):
         if ruta == 'contacts' and len(d) < 500: break
     return out
 prods, conts, notas = todo('products'), todo('contacts'), todo('documents/invoice')
+try:   # cuentas de tesorería: id -> [nombre, archivada]; cada pago de una nota dice en cuál cuenta quedó (el vendedor ve si coincide con su recibo)
+    ctas = {x['id']: [x.get('name') or '', 1 if (x.get('archived') or re.search(r'\bOLD\b', x.get('name') or '', re.I)) else 0] for x in json.loads(urllib.request.urlopen(urllib.request.Request('https://api.holded.com/api/invoicing/v1/treasury', headers=h), timeout=90).read())}
+except Exception: ctas = {}
 precios = {}
 for x in prods:
     sku = (x.get('sku') or '').strip()
@@ -30,7 +33,7 @@ cl = sorted(([x['id'], ' '.join((x.get('name') or '').split()), ((x.get('tags') 
              if x.get('type') == 'client' and (x.get('name') or '').strip() and x['id'] != NUEVO['id']), key=lambda r: r[1].upper())
 assert len(precios) > 50 and len(cl) > 50, 'Holded devolvió muy pocos datos; no se toca datos.json'
 # --- Cobranzas: notas pendientes (y saldadas hace poco) por cliente. Solo lectura de Holded.
-# Cada nota: [id, número, idCliente, fecha, vence, total, pagado, pendiente, tarifa, desc%, saldoReal, saldoBs, [[idPago, monto, fecha]], factura]
+# Cada nota: [id, número, idCliente, fecha, vence, total, pagado, pendiente, tarifa, desc%, saldoReal, saldoBs, [[idPago, monto, fecha, cuenta, archivada]], factura]
 #   factura = [número, iva] si la nota ya tiene factura AdriMan (etiquetas fac###### e iva##### que pone Claude al emitirla; iva en centavos de
 #   dólares de la nota, None si no vino), o None. El portal muestra la nota con su factura y el IVA aparte del neto.
 #   tarifa: 'u' USD, 'l' Lista, 'b' BCV, '?' no se pudo determinar (se deduce comparando los precios de la nota con las tarifas actuales).
@@ -61,11 +64,11 @@ def factura(tags):
         if v: iva = int(v.group(1)) / 100
     return [f, iva] if f else None
 tagcl = {x['id']: ((x.get('tags') or [''])[0] or '') for x in conts}
-corte = datetime.datetime.now().timestamp() - 21 * 86400; nt = {}
+corte = datetime.datetime.now().timestamp() - 90 * 86400; nt = {}   # todas las notas con pagos de los últimos 90 días: alimentan «Mis recibos» (archivo de 3 meses)
 corteFac = datetime.datetime.now().timestamp() - 90 * 86400   # notas con factura AdriMan: el IVA puede llegar después del neto (la app las deja abiertas hasta resolverlo)
 for n in notas:
     if n.get('draft') or not n.get('docNumber'): continue
-    pen, pag = round(float(n.get('paymentsPending') or 0), 2), [[y.get('id'), round(float(y.get('amount') or 0), 2), y.get('date')] for y in (n.get('paymentsDetail') or [])]
+    pen, pag = round(float(n.get('paymentsPending') or 0), 2), [[y.get('id'), round(float(y.get('amount') or 0), 2), y.get('date')] + (ctas[y['bankId']] if y.get('bankId') in ctas else []) for y in (n.get('paymentsDetail') or [])]
     if pen < 0.01 and not (pag and max(y[2] or 0 for y in pag) >= (corteFac if factura(n.get('tags')) else corte)): continue
     t, d = tarifa(n), float(n.get('discount') or 0)
     real = round(pen * FBCV, 2) if t == 'b' and d == 0 else pen
