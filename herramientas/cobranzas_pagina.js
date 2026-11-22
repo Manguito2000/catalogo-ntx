@@ -28,10 +28,10 @@ const cbIvaR = n => { const t = n && n.fac ? cbNeto(n) : 0; return t > 0 ? cbIva
 const cbRet = n => (CB.ret && CB.ret[n.id]) || null;
 const cbIvaDe = (n, neto) => { const iva = r2(neto * cbIvaR(n)), rt = (cbRet(n) || {}).rt || 0, ret = r2(iva * rt / 100); return { iva, rt, ret, paga:r2(iva - ret) }; };
 const cbSolDe = n => (CB.sol || []).find(q => q.n === n.id && q.est === "pendiente") || null;
-const cbNotas = () => (S.nt || []).map(NT);
-const cbCliente = id => { const c = (S.clientes || []).find(x => x.id === id); return c ? c.n : "Cliente"; };
+const cbNotas = () => { const L = (S.nt || []).map(NT); if(CB.adNota && VISTA === "admin" && !L.some(n => n.id === CB.adNota[0])) L.push(NT(CB.adNota)); return L; };   // + la nota que cobra administración
+const cbCliente = id => { const c = (S.clientes || []).find(x => x.id === id); return c ? c.n : (CB.adCli && CB.adCli[id]) || "Cliente"; };
 /* IVA ya cobrado de una nota facturada (cobros no anulados) y lo que falta: el IVA no va a Holded, solo se lleva aquí */
-const cbIvaRec = n => r2(cbCobros().filter(c => c.n === n.id && c.est !== "anulado" && c.est !== "rechazo").reduce((s, c) => s + (Number(c.iv) || 0), 0));
+const cbIvaRec = n => CB.adX && n && n.id === CB.adX.id && VISTA === "admin" ? r2(CB.adX.ivr || 0) : r2(cbCobros().filter(c => c.n === n.id && c.est !== "anulado" && c.est !== "rechazo").reduce((s, c) => s + (Number(c.iv) || 0), 0));
 const cbIvaPend = n => !n || !n.fac ? 0 : Math.max(0, r2(cbIvaT(n) - cbIvaRec(n)));
 /* IVA de una nota facturada. El neto se cubre primero; lo que entra después (en bolívares) es IVA. Mientras el IVA no esté resuelto
    (completo, o lo recibido + la retención marcada = IVA de la factura) la nota sigue abierta para más pagos, aunque Holded ya tenga el neto. */
@@ -242,7 +242,7 @@ async function cbCapFlush(){
   for(const it of CB.capCola.slice()){
     if(CB.cola.some(o => o.id === it.id && o.est === "cola")) continue;           // el cobro aún no llegó al receptor
     let r = null;
-    try{ const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, redirect:"follow", body:JSON.stringify({ a:"cap", cod, d, x:{ id:it.id }, tipo:it.tipo, b64:it.b64 }) }); r = JSON.parse(await res.text()); }
+    try{ const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, redirect:"follow", body:JSON.stringify({ a:"cap", cod, d, k:S.adm || "", x:{ id:it.id }, tipo:it.tipo, b64:it.b64 }) }); r = JSON.parse(await res.text()); }
     catch(e){ break; }                                                              // sin conexión: se intenta luego
     if(r && r.estado === "ok"){ CB.capCola = CB.capCola.filter(x => x.id !== it.id); const c = (CB.cobros || []).find(x => x.id === it.id); if(c) c.cap = 1; }
     else if(++it.n >= 6 || (r && r.estado === "no")) CB.capCola = CB.capCola.filter(x => x.id !== it.id);   // el receptor no la acepta: no se insiste para siempre
@@ -269,6 +269,7 @@ function cbVisible(n){
     if(pendiente(c)) pc += cbBv(c, n);
     else if(c.est === "confirmado" && (c.pg || []).some(p => !tengo.has(p[0]))) pc += cbBv(c, n);   // confirmado, pero los datos de Holded que tiene el teléfono aún no traen ese pago
   });
+  if(CB.adX && n.id === CB.adX.id && VISTA === "admin") (CB.adX.pc || []).forEach(p => { if(!cbCobros().some(c => c.id === p[0])) pc += Number(p[4]) || 0; });   // cobros de los vendedores aún sin registrar
   pc = r2(pc); return { pc, saldo:Math.max(0, r2(n.sal - pc)) };
 }
 /* Holded guarda las fechas como medianoche de España: sumando 2 h y leyendo en UTC sale el día de calendario correcto en cualquier teléfono */
@@ -292,6 +293,7 @@ function cobNav(v){
   const on = EXT && S.rol === "vendedor", c = v === "cobros", ad = on && !!S.adm; $("nav").hidden = !on; document.body.classList.toggle("con-nav", on);
   $("navAdm").hidden = !ad; $("nav").classList.toggle("n3", ad); $("navAdm").setAttribute("aria-current", v === "admin" ? "page" : "false");
   if(v !== "catalogo") solCero();
+  if(v !== "admin" && CB.adNota){ admNotaCierra(); if(CB.ok && CB.ok.cobro && CB.ok.cobro.ad) CB.ok = null; }   // al salir de ADMIN se suelta el cobro de administración
   if(v !== "admin"){ try{ admToast(""); }catch(e){} }
   $("navCob").setAttribute("aria-current", c ? "page" : "false"); $("navPed").setAttribute("aria-current", c || v === "admin" ? "false" : "page");
 }
@@ -300,6 +302,7 @@ const cbSt = c => c.est === "confirmado" ? `<span class="st ok">Confirmado</span
 const cbHora = t => t ? new Date(t * 1000).toLocaleString("es-VE", { day:"2-digit", month:"short", hour:"numeric", minute:"2-digit" }) : "";
 /* acciones de un cobro: ver recibo siempre; corregir o anular solo mientras administración no lo haya confirmado */
 function cbAcc(c){
+  if(c.ad) return c.rec ? `<button class="txt" data-cb="rec" data-id="${esc(c.id)}">Recibo</button>` : "";   // lo registró administración
   const pe = pendiente(c), sure = CB.del === c.id, hay = cbNotas().some(n => n.id === c.n);
   return (c.rec ? `<button class="txt" data-cb="rec" data-id="${esc(c.id)}">Recibo</button>` : "") +
     (c.est === "rechazo" ? `<button class="txt" data-cb="delok" data-id="${esc(c.id)}">Quitar de la lista</button>` : !pe ? "" : sure ? `<button class="txt" data-cb="delok" data-id="${esc(c.id)}">Sí, anular</button><button class="txt" data-cb="delno" style="color:var(--mut)">No</button>`
@@ -347,7 +350,7 @@ function cbPendHtml(){
 }
 function cbMetodos(c){ return [["Bs", c.bs], ["Efectivo", c.ef], ["USDT", c.us], ["Zelle", c.ze], ["Mercantil Panamá", c.mp]].filter(x => x[1] > 0).map(x => x[0] + " " + money(x[1])).join(" · ") + (Number(c.iv) > 0 ? " · IVA " + money(c.iv) : "") + (Number(c.dd) > 0 ? " · desc. divisas " + c.dd + " %" : "") + (c.cap ? " · captura" : ""); }
 function cbEntHtml(){
-  const todos = cbCobros().filter(c => c.est !== "anulado").sort((a, b) => (b.t || 0) - (a.t || 0)), pend = todos.filter(pendiente), conf = todos.filter(c => c.est === "confirmado" && (c.tsc || c.t || 0) >= Date.now() / 1000 - 7 * 86400);
+  const todos = cbCobros().filter(c => c.est !== "anulado" && !c.ad).sort((a, b) => (b.t || 0) - (a.t || 0)), pend = todos.filter(pendiente), conf = todos.filter(c => c.est === "confirmado" && (c.tsc || c.t || 0) >= Date.now() / 1000 - 7 * 86400);
   const T = k => r2(pend.reduce((s, c) => s + (c[k] || 0), 0));
   let h = `<div class="box"><span class="lbl">Efectivo que debes entregar</span><b class="bs num" style="font-size:38px;line-height:1">${money(T("ef"))}</b>
     <small class="hint">USDT ${money(T("us"))} · Zelle ${money(T("ze"))}${T("mp") > 0 ? " · Mercantil Panamá " + money(T("mp")) : ""} · Bolívares ${money(T("bs"))} (en $) · ${pend.length} ${pend.length === 1 ? "cobro" : "cobros"} por confirmar</small></div>`;
@@ -373,10 +376,14 @@ function cbFormHtml(){
   const n = x.n, bcv = esB(n), ed = x.ed, c0 = cbCalc(n, CB.f, x.saldo);
   const F = (k, l) => `<label><span>${l}<button type="button" class="txt fill" data-cb="fill" data-k="${k}">Completar saldo</button></span><input class="fld num" id="cb_${k}" data-cb-in="${k}" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f[k])}"></label>`;
   const mios = cbCobros().filter(c => c.n === n.id && c.est !== "anulado" && !(ed && c.id === ed.id)).sort((a, b) => (b.t || 0) - (a.t || 0));
-  let h = `<button class="txt" data-cb="${ed ? "editx" : "volver"}" style="justify-self:start">‹ ${ed ? "Dejar el cobro como estaba" : "Volver a pendientes"}</button><h2 class="bs">${ed ? "Corregir cobro" : "Nota " + esc(n.num)}</h2>
+  const adm = !!(CB.adNota && CB.adNota[0] === n.id && VISTA === "admin");
+  let h = `<button class="txt" data-cb="${ed ? "editx" : "volver"}" style="justify-self:start">‹ ${ed ? "Dejar el cobro como estaba" : adm ? "Volver a cobros" : "Volver a pendientes"}</button><h2 class="bs">${ed ? "Corregir cobro" : "Nota " + esc(n.num)}</h2>
     <div class="box"><div class="sel"><span><b>${esc(cbCliente(n.cid))}</b><small>${esc(n.num)}${bcv ? " · BCV" : ""} · ${esc(cbVTxt(cbVence(n)) || "sin vencimiento")}</small></span><span style="flex:none;text-align:right"><small>Falta por cobrar</small><b class="bs num" style="font-size:26px">${money(x.saldo)}</b>${bcv ? `<small class="tb">tasa BCV</small>` : ""}</span></div>
       ${x.pc >= 0.01 ? `<p class="hint num">Ya anotaste ${money(x.pc)} por confirmar</p>` : ""}</div>`;
-  if(!ed) h += cbFacBox(n, x);
+  if(adm){ const pc = (CB.adX && CB.adX.pc) || [];
+    h += `<div class="box"><span class="lbl">Cobro de administración</span><p class="hint">El recibo sale con la serie A- y queda en la carpeta de ${esc(admVenTxt((CB.adX || {}).ven || ""))}. Al guardar se registra en Holded de una vez.</p>` +
+      (pc.length ? `<div class="msg">${pc.map(p => esc(p[2]) + " tiene por registrar el recibo " + esc(p[1]) + " (" + money(p[3]) + ")").join("<br>")}. Ya se descontó de lo que falta.</div>` : "") + `</div>`; }
+  else if(!ed) h += cbFacBox(n, x);
   if(mios.length && !ed) h += `<div class="box"><span class="lbl">Abonos que anotaste</span>` + mios.map(c => `<div class="cba"><div class="h"><b class="bs num">${money(c.nom)}</b>${cbSt(c)}</div>
       <div class="i num">${esc(c.rec || "Sin número")} · ${esc(cbHora(c.t))} · ${esc(cbMetodos(c))}${Math.abs(cbBv(c, n) - c.nom) >= 0.01 ? " · abona " + cbM(cbBv(c, n), n) : ""}</div>${(c.est === "revisar" || c.est === "rechazo") && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
       <div class="f">${cbAcc(c)}</div></div>`).join("") + `</div>`;
@@ -466,11 +473,15 @@ async function cbSrv(a, ex){
 /* El número de recibo lo pone el teléfono, para poder entregar el recibo en el momento aunque no haya conexión.
    Sigue la cuenta de lo último que conoce (lo guardado aquí y lo que devolvió el receptor). Si el receptor ya tenía ese número, asigna otro y se avisa. */
 const LSN = "ntx-cobros-n";
-function cbSigRec(){
+function cbSigRec(ad){
+  if(ad){ let n = 0; try{ n = Number(localStorage.getItem(LSN + "-a")) || 0; }catch(e){}
+    [].concat(cbCobros(), (AD.cb && AD.cb.d && AD.cb.d.cob) || []).forEach(c => { const m = /^A-(\d+)$/.exec(c.rec || ""); if(m) n = Math.max(n, Number(m[1])); });
+    n += 1; try{ localStorage.setItem(LSN + "-a", String(n)); }catch(e){} return "A-" + ("000" + n).slice(-4); }
   let n = 0, pre = ""; try{ n = Number(localStorage.getItem(LSN)) || 0; }catch(e){}
-  cbCobros().forEach(c => { const m = /^([A-Z]+)-(\d+)$/.exec(c.rec || ""); if(m){ pre = pre || m[1]; n = Math.max(n, Number(m[2])); } });
+  cbCobros().filter(c => !c.ad).forEach(c => { const m = /^([A-Z]+)-(\d+)$/.exec(c.rec || ""); if(m){ pre = pre || m[1]; n = Math.max(n, Number(m[2])); } });
   n += 1; try{ localStorage.setItem(LSN, String(n)); }catch(e){}
-  return (pre || ((S.yo && S.yo.tag) || "x").charAt(0).toUpperCase()) + "-" + ("000" + n).slice(-4);
+  const t = String((S.yo && S.yo.tag) || "x").toUpperCase();
+  return (pre || (t.charAt(0) === "A" ? t.charAt(0) + t.charAt(t.length - 1) : t.charAt(0))) + "-" + ("000" + n).slice(-4);
 }
 function cbCambioRec(o, c){ if(o.rec && c.rec && o.rec !== c.rec) CB.avisos.push("El recibo " + o.rec + " de " + (c.cn || "un cliente") + " quedó registrado con el número " + c.rec + ". Si ya se lo enviaste al cliente, envíale el nuevo."); }
 const cbB64 = o => { const b = new TextEncoder().encode(JSON.stringify(o)); let s = ""; b.forEach(x => s += String.fromCharCode(x)); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
@@ -480,8 +491,8 @@ function cbMerge(c){ CB.cobros = [c].concat((CB.cobros || []).filter(x => x.id !
 async function cbEnviar(o){
   let r;
   try{ r = await cbSrv("cobro", { x:cbB64({ id:o.id, rec:o.rec || "", n:o.n, ef:o.ef, us:o.us, ze:o.ze, mp:o.mp || 0, bs:o.bs, iv:o.iv || 0, ab:o.ab, bv:o.bv, dd:o.dd || 0, tb:o.tb || "", ta:o.ta || 0,
-    bsb:o.bsb || 0, tbc:o.tbc || 0, fp:o.fp || "", ct:o.ct || "", cd:o.cd || "", lx:o.lx || "", rf:o.rf || "", cn:o.cn }) }); }catch(e){ return { net:true }; }
-  if(r && r.estado === "ok" && r.cobro){ if(r.aviso) CB.avisos.push(r.aviso); return { ok:true, cobro:r.cobro }; }
+    bsb:o.bsb || 0, tbc:o.tbc || 0, fp:o.fp || "", ct:o.ct || "", cd:o.cd || "", lx:o.lx || "", rf:o.rf || "", cn:o.cn }), ...(o.ad ? { k:S.adm } : {}) }); }catch(e){ return { net:true }; }
+  if(r && r.estado === "ok" && r.cobro){ if(r.aviso) CB.avisos.push(r.aviso); return { ok:true, cobro:Object.assign(r.cobro, o.ad ? { ad:1 } : {}), reg:r.reg }; }
   if(r && r.estado === "no") return { err:"Este dispositivo ya no está autorizado. Habla con administración." };
   return { err:(r && r.msg) || "No se pudo guardar el cobro." };
 }
@@ -540,16 +551,18 @@ async function cbGuardar(){
     ta:c.bs > 0 && !esB(x.n) ? cbNum(CB.f.ta) : 0, bsb:c.bs > 0 ? cbNum(CB.f.bsb) : 0, tbc:c.bs > 0 && esB(x.n) && cbNum(CB.f.bsb) > 0 ? Number(String(CB.f.tb || "").replace(",", ".")) || 0 : 0,
     fp:/^\d{4}-\d{2}-\d{2}$/.test(CB.f.fp || "") ? CB.f.fp : "", ct:lec ? lec.ct || "?" : "", cd:lec && !lec.ct ? String(lec.dest || "").slice(0, 60) : "",
     lx:lec ? [lec.met, lec.mon, lec.monto, lec.fecha + (lec.fechaDe === "imagen" ? "(img)" : ""), lec.hora, lec.ref].join(" ").slice(0, 160) : "",
-    rf:(CB.f.rf || "").trim().slice(0, 120), est:"cola", rec:cbSigRec(), fa:x.n.fac ? x.n.fac[0] : "", cap:cap ? 1 : 0 };
+    rf:(CB.f.rf || "").trim().slice(0, 120), est:"cola", rec:"", fa:x.n.fac ? x.n.fac[0] : "", cap:cap ? 1 : 0 };
+  if(S.adm && CB.adNota && CB.adNota[0] === x.n.id && VISTA === "admin") o.ad = 1;
+  o.rec = cbSigRec(!!o.ad);
   const r = await cbEnviar(o); CB.busy = false;
   if(r.err){ CB.err = /mayor que lo que falta/.test(r.err) ? r.err + ". Holded ya tiene registrado un pago de esta nota; el saldo de esta pantalla estaba atrasado y se está actualizando." : r.err; CB.t0 = 0; cobRender(); cbRefresca(); return; }
-  let cobro;
-  if(r.ok){ cobro = r.cobro; cbCambioRec(o, cobro); cbMerge(cobro); } else { cobro = o; CB.cola.push(o); cbSave(); }
+  let cobro, reg = null;
+  if(r.ok){ cobro = r.cobro; reg = r.reg || null; cbCambioRec(o, cobro); cbMerge(cobro); } else { cobro = o; CB.cola.push(o); cbSave(); }
   if(cap && cap.f) cbCapGuarda(o.id, cobro.rec, cap.f);                                   // la captura se sube aparte, sin hacer esperar el recibo
   if(det){ CB.avisos.push("Nota " + x.n.num + ": " + det.txt);                                 // IVA: completo, retención 75/100 o incompleto
     if((det.est === "completo" || det.est === "r75") && det.rt !== ((cbRet(x.n) || {}).rt || 0)) cbRetSet(x.n.id, det.rt, null); }
   if(CB.cap && CB.cap.url) URL.revokeObjectURL(CB.cap.url);
-  CB.f = cbF0(); CB.cap = null; CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; CB.nota = null; CB.ok = { cobro }; cobRender(); cobBadge(); window.scrollTo(0, 0);
+  CB.f = cbF0(); CB.cap = null; CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; CB.nota = null; CB.ok = { cobro, reg }; cobRender(); cobBadge(); window.scrollTo(0, 0);
 }
 
 /* ---------- recibo (imagen + texto) ---------- */
@@ -585,7 +598,7 @@ function cbImg(c){
 }
 /* al compartir la imagen, el texto lleva solo el número de recibo y el de nota: basta para encontrarlo luego con el buscador de WhatsApp */
 async function cbShare(id){
-  const c = cbCobros().find(x => x.id === id); if(!c || !c.rec) return; const txt = cbReciboTxt(c);
+  const c = cbCobros().find(x => x.id === id) || (CB.ok && CB.ok.cobro && CB.ok.cobro.id === id ? CB.ok.cobro : null); if(!c || !c.rec) return; const txt = cbReciboTxt(c);
   try{ const blob = CB.img[c.id] || await cbImg(c); CB.img[c.id] = blob; await navigator.share({ files:[new File([blob], "Recibo " + c.rec + ".png", { type:"image/png" })], text:"Recibo " + c.rec + " · Nota " + (c.nn || "") }); }
   catch(e){ if(e && e.name === "AbortError") return; CB.avisos.push("Este teléfono no dejó compartir la imagen. Usa «Enviar solo el texto por WhatsApp»."); cobRender(); }
 }
@@ -712,7 +725,7 @@ const admVenTxt = s => admEsYo(s) ? "Mango" : s;
 function admBadge(){
   const b = $("admN"); if(!b) return;
   const stock = AD.hechos.filter(h => !h.ok && !h.visto && /STOCK:/.test(String(h.avisos || ""))).length;
-  const n = AD.ped.length + AD.rev.length + AD.sol.filter(q => q.est === "pendiente").length + AD.ret.filter(r => !r.rec).length + stock;
+  const n = AD.ped.length + AD.rev.length + AD.sol.filter(q => q.est === "pendiente").length + AD.ret.filter(r => !r.rec).length + stock + (AD.cb ? admCobN() : 0);
   b.hidden = !n; b.textContent = n;
 }
 function admAplica(r){ if(r && r.estado === "ok"){ AD.sol = r.sol || []; AD.ret = r.ret || []; AD.err = ""; AD.cargado = true; return true; } AD.err = (r && r.msg) || "No se pudo leer la bandeja de facturas."; return false; }
@@ -728,7 +741,8 @@ async function admCarga(forzar){
   if(!S.adm) return; AD.t = Date.now(); const g = AD.gen;
   await Promise.all([
     (async () => { try{ admAplica(await admSrv("adm")); }catch(e){ AD.err = "Sin conexión."; } })(),
-    (async () => { try{ const r = await admSrv("bandeja", forzar ? { f:1 } : null); if(g === AD.gen) admAplicaB(r); }catch(e){ AD.errB = "Sin conexión."; } })()
+    (async () => { try{ const r = await admSrv("bandeja", forzar ? { f:1 } : null); if(g === AD.gen) admAplicaB(r); }catch(e){ AD.errB = "Sin conexión."; } })(),
+    admCobCarga(forzar)
   ]);
   admBadge(); if(VISTA === "admin" && !admEscribiendo()) admRender();
 }
@@ -748,10 +762,12 @@ async function admBac(ex, msg, local, undo){
 function admToast(txt, undo){
   let t = $("admToast");
   if(!t){ t = document.createElement("div"); t.id = "admToast"; t.setAttribute("role", "status");
-    t.addEventListener("click", e => { const b = e.target.closest("[data-undo]"); if(!b) return; const id = b.dataset.undo; admToast(""); admBac({ h:id, e:"mostrar" }, "Devuelto a la bandeja"); });
+    t.addEventListener("click", e => { const b = e.target.closest("[data-undo]"); if(!b) return; const id = b.dataset.undo, fn = AD.undoFn; AD.undoFn = null; admToast("");
+      if(id === "fn"){ if(fn) fn(); return; } admBac({ h:id, e:"mostrar" }, "Devuelto a la bandeja"); });
     document.body.appendChild(t); }
   clearTimeout(AD.tt); if(!txt){ t.className = ""; return; }
-  t.innerHTML = `<span>${esc(txt)}</span>` + (undo ? `<button data-undo="${esc(undo)}">Deshacer</button>` : ""); t.className = "on";
+  AD.undoFn = typeof undo === "function" ? undo : null;
+  t.innerHTML = `<span>${esc(txt)}</span>` + (undo ? `<button data-undo="${typeof undo === "function" ? "fn" : esc(undo)}">Deshacer</button>` : ""); t.className = "on";
   AD.tt = setTimeout(() => { t.className = ""; }, undo ? 6000 : 2600);
 }
 function admCopia(txt){
@@ -866,17 +882,19 @@ function admFacturas(){
 function admRender(){
   const el = $("vCob"); if(!el) return;
   if(!S.adm){ el.innerHTML = `<div class="box"><p class="hint">Esta sección es solo de administración.</p></div>`; return; }
+  if(AD.tab === "cob" && admCobForm(el)) return;                                         // cobro de administración: formulario o recibo
+  const nC = AD.cb ? admCobN() : 0;
   const nP = AD.ped.filter(v => admVenOk(v.vend)).length, nQ = AD.pre.filter(v => !v.vencido && admVenOk(v.vend)).length;
   const nF = AD.sol.filter(q => q.est === "pendiente" && admVenOk(q.ven)).length + AD.ret.filter(r => !r.rec && admVenOk(r.ven)).length;
-  const tabs = `<div class="seg fl tabs" role="group" aria-label="Administración">${[["ped", "Pedidos" + (nP ? " (" + nP + ")" : "")], ["pre", "Presupuestos" + (nQ ? " (" + nQ + ")" : "")], ["fac", "Facturas" + (nF ? " (" + nF + ")" : "")]].map(([k, l]) => `<button data-ad="tab" data-k="${k}" aria-pressed="${AD.tab === k}">${l}</button>`).join("")}</div>`;
-  const err = (AD.tab === "fac" ? AD.err : AD.errB) || ""; let h = tabs + admChips() + (err ? `<div class="msg">${esc(err)}</div>` : "");
-  h += AD.tab === "fac" ? admFacturas() : admPedidos(AD.tab === "pre" ? "presupuesto" : "pedido");
+  const tabs = `<div class="seg fl tabs" role="group" aria-label="Administración">${[["ped", "Pedidos" + (nP ? " (" + nP + ")" : "")], ["pre", "Presupuestos" + (nQ ? " (" + nQ + ")" : "")], ["fac", "Facturas" + (nF ? " (" + nF + ")" : "")], ["cob", "Cobros" + (nC ? " (" + nC + ")" : "")]].map(([k, l]) => `<button data-ad="tab" data-k="${k}" aria-pressed="${AD.tab === k}">${l}</button>`).join("")}</div>`;
+  const err = AD.tab === "cob" ? "" : (AD.tab === "fac" ? AD.err : AD.errB) || ""; let h = tabs + admChips() + (err ? `<div class="msg">${esc(err)}</div>` : "");
+  h += AD.tab === "fac" ? admFacturas() : AD.tab === "cob" ? admCobros() : admPedidos(AD.tab === "pre" ? "presupuesto" : "pedido");
   h += `<p class="hint">${AD.recv ? "Actualizado " + esc(new Date(AD.recv).toLocaleTimeString("es-VE", { hour:"numeric", minute:"2-digit" })) + " · " : ""}Se actualiza sola cada 3 minutos; jala hacia abajo para actualizar ahora.</p>`;
   el.innerHTML = h;
 }
 $("vCob").addEventListener("click", e => {
   const a = e.target.closest("[data-ad]"); if(!a || VISTA !== "admin") return; const k = a.dataset.ad, id = a.dataset.id;
-  if(k === "tab"){ AD.tab = a.dataset.k; admRender(); window.scrollTo(0, 0); }
+  if(k === "tab"){ AD.tab = a.dataset.k; if(AD.tab === "cob") admCobCarga(); admRender(); window.scrollTo(0, 0); }
   else if(k === "sub"){ AD.sub = a.dataset.k; admRender(); }
   else if(k === "ven"){ AD.ven = a.dataset.k; admRender(); }
   else if(k === "abre"){ AD.abre[id] = !AD.abre[id]; admRender(); }
@@ -908,7 +926,8 @@ const RC_MET = { "CAJA CHICA":"Efectivo", "USDT":"USDT", "NUEVO ZELLE":"Zelle", 
 const RC_ICO = { ok:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>`,
   dif:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
   pend:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>` };
-const rcTodos = () => { const m = new Map(); (CB.rc.hist || []).forEach(c => m.set(c.id, c)); cbCobros().forEach(c => m.set(c.id, c)); return Array.from(m.values()).filter(c => c.est !== "anulado"); };
+const rcTodos = () => { const m = new Map(); (CB.rc.hist || []).forEach(c => m.set(c.id, c)); cbCobros().forEach(c => m.set(c.id, c));
+  return Array.from(m.values()).filter(c => c.est !== "anulado" && !(S.adm && c.ad && !(S.nt || []).some(r => r[0] === c.n))); };   // en el teléfono de Mango, los cobros A- de clientes de otros vendedores no son «suyos»
 const rcDia = ts => ts ? new Date(ts * 1000).toLocaleDateString("es-VE", { day:"numeric", month:"short" }).replace(".", "") : "";
 const rcDiaH = ts => ts ? cbDia(ts).toLocaleDateString("es-VE", { day:"numeric", month:"short" }).replace(".", "") : "";
 const rcBs = v => "Bs " + Number(v).toLocaleString("es-VE", { minimumFractionDigits:2, maximumFractionDigits:2 });
@@ -932,6 +951,8 @@ function rcMet(c){
 }
 /* estado de un recibo: s = ok | dif | pend, adm = lo que dice administración */
 function rcEst(c){
+  if(c.ad && c.est !== "confirmado") return { s:"pend", adm:"Administración lo está registrando en Holded" };
+  if(c.est === "confirmado" && c.ad && !c.dif) return { s:"ok", adm:"Registrado por administración" + (c.cr && c.cr !== "sin pago en Holded" ? " · Holded: " + c.cr : "") };
   if(c.est === "confirmado") return c.dif ? { s:"dif", adm:c.dif } : { s:"ok", adm:c.cr && c.cr !== "sin pago en Holded" ? "Holded: " + c.cr : c.cr === "sin pago en Holded" ? "Era solo IVA: no se registra en Holded" : "Registrado en Holded" };
   if(c.est === "revisar") return { s:"dif", adm:c.obs || "Administración está revisando este cobro" };
   if(c.est === "rechazo") return { s:"dif", adm:"No registrado: " + (c.obs || "administración no lo aceptó") };
@@ -1054,6 +1075,217 @@ async function rcAvisar(id){
   CB.rc.avBusy = ""; cobRender();
 }
 
+/* ---------- ADMIN › Cobros (parte 3): por registrar en Holded, con diferencia, por anotar en carpeta y cobro de administración (A-) ----------
+   Datos: a=adcob (el receptor concilia al momento con Holded). Registrar = a=adreg (el receptor escribe el pago en Holded, uno por cuenta).
+   El cobro de administración reutiliza el formulario del vendedor (lector de capturas incluido) con la nota en CB.adNota. */
+AD.cb = { d:null, err:"", t:0, cargando:false, sub:"reg", conf:"", busy:"", msg:[], pick:false, q:"", sigue:{}, anular:"", hechos:{} };
+const admCobRegs = d => (d.cob || []).filter(c => c.est === "cobrado" || (c.est === "revisar" && (/^Lleva/.test(c.obs || "") || (c.reg || []).length)));
+const admCobDifs = d => (d.cob || []).filter(c => admCobRegs(d).indexOf(c) < 0);
+const admCobN = () => { const d = AD.cb.d; return d ? admCobRegs(d).length + admCobDifs(d).length + (d.arch || []).length : 0; };
+async function admCobCarga(forzar){
+  if(!S.adm || AD.cb.cargando || (!forzar && AD.cb.t && Date.now() - AD.cb.t < 25000)) return; AD.cb.cargando = true;
+  try{ const r = await admSrv("adcob");
+    if(r && r.estado === "ok"){ AD.cb.d = r; AD.cb.err = ""; AD.cb.t = Date.now(); if(Array.isArray(r.tasas) && r.tasas.length){ const m = new Map((CB.tasas || []).map(x => [x[0], x])); r.tasas.forEach(x => m.set(x[0], x)); CB.tasas = Array.from(m.values()); cbSave(); } }
+    else AD.cb.err = (r && r.estado === "no") ? "Esta llave de administración ya no es válida." : (r && r.msg) || "No se pudieron leer los cobros."; }
+  catch(e){ AD.cb.err = "Sin conexión: se muestra lo último que llegó."; }
+  AD.cb.cargando = false; admBadge();
+  if(VISTA === "admin" && AD.tab === "cob" && !CB.nota && !CB.ok && !admEscribiendo()) admRender();
+}
+/* tarifa de una nota por sus precios (igual que refrescar_datos.py): para las notas creadas después del último refresco */
+function admTarifa(ln){
+  if(!ln || !S.precios) return ""; const v = { u:0, l:0, b:0 }; let m = 0;
+  ln.forEach(([sku, pr]) => { const t = S.precios[String(sku).trim()]; if(!t || !(pr > 0)) return; m++;
+    let best = null; [["u", t[0]], ["l", t[1]], ["b", t[2]]].forEach(([q, ref]) => { if(ref > 0){ const d = Math.abs(pr - ref) / ref; if(!best || d < best[0]) best = [d, q]; } });
+    if(best && best[0] <= 0.02) v[best[1]]++; });
+  const q = Object.keys(v).sort((a, b) => v[b] - v[a])[0]; return m && v[q] * 2 > m ? q : "";
+}
+function admFilaNota(x, tar){
+  const d = x.d || 0, pen = x.pen, real = tar === "b" && !d ? r2(pen * FBCV()) : pen, bcv = tar === "b" ? (d > 0 ? r2(pen / (1 - d / 100)) : pen) : null;
+  return [x.id, x.num, x.c, x.f, x.v, x.tot, x.pag, pen, tar, d, real, bcv, x.pg || [], x.fac || null];
+}
+function admNotaAbre(id){
+  const x = ((AD.cb.d && AD.cb.d.np) || []).find(n => n.id === id); if(!x) return;
+  const tar = (S.ntar && S.ntar[id]) || admTarifa(x.ln) || "?";
+  CB.adCli = CB.adCli || {}; CB.adCli[x.c] = x.cn; CB.adX = x; CB.adNota = admFilaNota(x, tar === "l" ? "u" : tar);
+  if(x.fac && !(CB.ret && CB.ret[id])){ CB.ret = CB.ret || {}; CB.ret[id] = { rt:x.rt || 0 }; }
+  CB.nota = id; CB.f = cbF0(); CB.cap = null; CB.edit = null; CB.ok = null; CB.err = ""; CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; CB.del = null;
+  admRender(); window.scrollTo(0, 0);
+}
+const admNotaCierra = () => { CB.nota = null; CB.adNota = null; CB.adX = null; CB.edit = null; CB.cap = null; };
+const admCtaMet = c => RC_MET[c] || c || "Pago";
+const admDia = ts => rcDiaH(ts);
+function admTasaHtml(){
+  const ts = (AD.cb.d && AD.cb.d.tasas) || CB.tasas || [], hoy = cbHoy(), t = ts.filter(x => x[0] <= hoy).sort((a, b) => a[0] < b[0] ? 1 : -1)[0], man = ts.filter(x => x[0] > hoy).sort((a, b) => a[0] < b[0] ? 1 : -1)[0];
+  if(!t) return "";
+  return `<div class="adtasa"><span>${t[0] === hoy ? "Tasa BCV de hoy" : "Tasa BCV del " + esc(cbFecha2(t[0]))} · se actualiza sola${man ? `<small>Para el ${esc(cbFecha2(man[0]))}: ${esc(cbCom(man[1], 2))}</small>` : ""}</span><b class="bs num">${esc(cbCom(t[1], 2))}</b></div>`;
+}
+function admCobCab(c){
+  return `<div class="adch"><span class="adcl"><span class="adcs">${esc(c.rec || "Sin número")} · ${esc(admVenTxt(c.ven))} · ${esc(rcDia(c.t))}${c.ad ? " · administración" : ""}</span><b class="adcn">${esc(c.cn || "Cliente")}</b>
+    <span class="adcs">${esc(c.nn || "")} · ${c.tb === "b" ? "BCV" : "nota USD"}${c.fa ? " · Fac. " + esc(c.fa) : ""}</span></span>
+    <span class="adcr"><b class="bs num">${money(c.nom)}</b>${c.tb === "b" ? `<small>TASA BCV</small>` : ""}</span></div>`;
+}
+const admMetTab = c => { const m = [["ef", "EFECTIVO"], ["us", "USDT"], ["ze", "ZELLE"], ["mp", "MERCANTIL PANAMÁ"], ["bs", "BOLÍVARES"]].filter(x => Number(c[x[0]]) > 0).map(x => x[1]); return (m.join(" + ") || "COBRO") + (c.fa && Number(c.bs) > 0 ? " · CON FACTURA" : ""); };
+function admParteTxt(c, p){
+  if(p.k !== "bs" || c.tb !== "b") return "";
+  const bcv = r2((Number(c.bs) || 0) - (Number(c.iv) || 0)); return bcv > 0 && Math.abs(bcv * FBCV() - p.m) < 0.05 ? " (" + money(bcv) + " BCV × " + cbCom(FBCV(), 2) + ")" : "";
+}
+function admRegCard(c){
+  const conf = AD.cb.conf === c.id, busy = AD.cb.busy === c.id, hechas = c.reg || [], partes = c.partes || [], falta = partes.filter(p => hechas.indexOf(p.k) < 0);
+  const soloEf = partes.length === 1 && partes[0].k === "ef", suma = r2(falta.reduce((s, p) => s + p.m, 0)), ret = (AD.ret || []).find(r => r.n === c.n);
+  const av = String(c.av || "").split(" · ").filter(Boolean);
+  if(c.est === "revisar" && c.obs) av.unshift(c.obs);
+  if(c.tb === "b" && !(c.nd > 0) && c.npen != null) av.push("La nota aún no tiene el " + DBCV + " % en Holded: quedará un saldo hasta que se lo pongas.");
+  if(c.npen != null && suma > c.npen + 0.5) av.push("En Holded la nota solo tiene " + money(c.npen) + " pendientes.");
+  let h = `<div class="adw"><span class="rct pc">${esc(admMetTab(c))}</span><article class="rcc adc">${admCobCab(c)}
+    <span class="adm">${esc(rcMet(c))}</span>
+    <div class="adbx">${partes.map(p => `<span>${hechas.indexOf(p.k) >= 0 ? "Ya está en Holded" : "Va a la nota"}</span><b class="num">${money(p.m)}</b><small>en ${esc(p.cta)}${esc(admParteTxt(c, p))}</small>`).join("")}
+      ${Number(c.iv) > 0 ? `<span>IVA cobrado (no va a Holded)</span><b class="num">${cbM(Number(c.iv), { tar:c.tb === "b" ? "b" : "u" })}</b>` : ""}
+      ${c.fa && ret && ret.rt > 0 ? `<small class="adret">Retuvo ${ret.rt} % · ${ret.rec ? "comprobante recibido" : "comprobante pendiente"}</small>` : ""}
+      <small>Fecha del pago en Holded: ${esc(cbFecha2(c.fh || ""))}</small></div>
+    ${av.map(a => `<div class="msg">${esc(a)}</div>`).join("")}`;
+  if(busy) h += `<button class="send" disabled>REGISTRANDO EN HOLDED…</button>`;
+  else if(conf) h += `<div class="adcf"><b>¿Registrar en Holded?</b><span>${falta.map(p => money(p.m) + " en " + esc(p.cta)).join(" + ")} · ${esc(cbFecha2(c.fh || ""))}</span>
+      <div class="adbt"><button class="ghost" data-ad="cbno">Cancelar</button><button class="send" data-ad="cbsi" data-id="${esc(c.id)}">SÍ, REGISTRAR</button></div></div>`;
+  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="send" data-ad="cbreg" data-id="${esc(c.id)}">${soloEf ? "RECIBÍ EL EFECTIVO · REGISTRAR" : hechas.length ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED"}</button></div>`;
+  return h + `</article></div>`;
+}
+function admDifCard(c){
+  const m = /^Holded: (.*) · tu recibo: (.*)$/.exec(c.dif || ""), arch = /archivada/.test(c.dif || ""), rev = c.est === "revisar", sig = AD.cb.sigue[c.id], an = AD.cb.anular === c.id;
+  const hold = (c.pg || []).reduce((s, p) => s + (Number(p[1]) || 0), 0), coincide = c.est === "confirmado" && hold && Math.abs(hold - c.ab) < 0.06;
+  let h = `<div class="adw"><span class="rct dif">${rev ? "MONTO DISTINTO" : arch ? "CUENTA ARCHIVADA" : "CUENTA DISTINTA"}</span><article class="rcc adc">${admCobCab(c)}`;
+  if(rev) h += `<div class="adbx dif"><span>${esc(c.obs || "Administración debe revisarlo")}</span></div>`;
+  else h += `<div class="adbx dif g2"><span>Recibo</span><b>${esc(rcMet(c).split(" · ")[0])} → ${esc(m ? m[2] : c.ch || "—")}</b><span>Holded</span><b class="rojo">${esc(m ? m[1] : (c.cr || "").replace(/ \$[\d.,]+/g, ""))}</b></div>`;
+  const pie = [c.avv ? admVenTxt(c.ven) + " avisó el " + c.avv : "", coincide ? "el monto sí coincide" : ""].filter(Boolean).join(" · ");
+  if(pie) h += `<span class="adcs">${esc(pie)}</span>`;
+  if(sig) h += `<div class="msg">Holded todavía dice ${esc((c.cr || "").replace(/ \$[\d.,]+/g, ""))}. Corrígelo en Holded, o déjalo así si fue a propósito.</div>`;
+  if(rev) h += an ? `<div class="adcf"><b>¿Anular el recibo ${esc(c.rec)}?</b><span>Desaparece de las cuentas por cobrar del vendedor.</span><div class="adbt"><button class="ghost" data-ad="cbno">No</button><button class="send" data-ad="cbanusi" data-id="${esc(c.id)}">SÍ, ANULAR</button></div></div>`
+    : `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="ghost" data-ad="cbanu" data-id="${esc(c.id)}">Anular</button><button class="send" data-ad="cbconf" data-id="${esc(c.id)}">CONFIRMAR ASÍ</button></div>`;
+  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}${sig ? `<button class="ghost" data-ad="cbacep" data-id="${esc(c.id)}">Dejar así</button>` : ""}<button class="send" data-ad="cbrev" data-id="${esc(c.id)}"${AD.cb.busy === c.id ? " disabled" : ""}>${AD.cb.busy === c.id ? "REVISANDO…" : "YA LO CORREGÍ"}</button></div>`;
+  return h + `</article></div>`;
+}
+function admArchCard(p){
+  return `<div class="adw"><span class="rct dif">CUENTA ARCHIVADA</span><article class="rcc adc"><div class="adch"><span class="adcl"><span class="adcs">Directo en Holded · ${esc(admVenTxt(p.ven))} · ${esc(admDia(p.f))}</span><b class="adcn">${esc(p.cn)}</b><span class="adcs">${esc(p.nn)}</span></span><span class="adcr"><b class="bs num">${money(p.m)}</b></span></div>
+    <div class="adbx dif g2"><span>Holded</span><b class="rojo">${esc(p.cta)}</b></div><p class="hint">Muévelo en Holded a la cuenta activa que corresponde; sale de aquí solo.</p></article></div>`;
+}
+/* carpeta: por vendedor y por nota; el monto grande es el de Holded (el que se anota en el papel) y, en notas BCV, su equivalente pequeño */
+function admCarpetas(lista){
+  const g = {}; lista.forEach(x => { (g[x.ven] = g[x.ven] || {}); (g[x.ven][x.n] = g[x.ven][x.n] || []).push(x); });
+  return Object.keys(g).sort((a, b) => (a === "Sin vendedor") - (b === "Sin vendedor") || a.localeCompare(b, "es")).map(v => {
+    const notas = Object.keys(g[v]).map(n => g[v][n]).sort((a, b) => a[0].f - b[0].f);
+    return { ven:v, notas, n:notas.length, p:notas.reduce((s, x) => s + x.length, 0) };
+  });
+}
+function admCarHtml(lista){
+  if(!lista.length) return `<div class="adok">Todas las carpetas están al día.</div>`;
+  return admCarpetas(lista).map(cp => `<section class="adcp"><div class="adcph"><span><b class="bs">CARPETA ${esc(admVenTxt(cp.ven).toUpperCase())}</b><small>${cp.n} ${cp.n === 1 ? "nota" : "notas"} · ${cp.p} ${cp.p === 1 ? "pago" : "pagos"}</small></span>
+      <button class="mini" data-ad="carv" data-k="${esc(cp.ven)}">Toda anotada</button></div>` +
+    cp.notas.map(ps => { const x = ps[0], sal = x.pen < 0.01;
+      return `<article class="rcc adc adnt"><div class="adch"><span class="adcl"><span class="rcne bs">${esc(x.nn)}</span><b class="adcn">${esc(x.cn)}</b></span><span class="st ${sal ? "ok" : "az"}">${sal ? "Saldada" : "Quedan " + money(x.pen)}</span></div>
+        <div class="adpg">${ps.map(p => { const eq = p.rbv ? r2(p.m * p.rbv) : (S.ntar && S.ntar[p.n] === "b") || p.tb === "b" ? r2(p.m / FBCV()) : 0;
+          return `<span class="d">${esc(admDia(p.f))}</span><span class="m"><b>${esc(admCtaMet(p.cta))}${p.arch ? " (archivada)" : ""}</b><small>${p.rec ? "Recibo " + esc(p.rec) + (p.ad ? " · administración" : "") : "Directo en Holded, sin recibo"}</small></span>
+            <span class="v"><b class="num">${money(p.m)}</b>${eq ? `<small class="num">= ${money(eq)} BCV</small>` : ""}</span>`; }).join("")}</div>
+        <button class="send" data-ad="carn" data-id="${esc(x.n)}">YA LA ANOTÉ</button></article>`; }).join("") + `</section>`).join("");
+}
+async function admCarMarca(ps, e){
+  try{ const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, redirect:"follow", body:JSON.stringify({ a:"adcar", k:S.adm, e, p:ps.map(p => [p.p, p.nn, p.m]) }) });
+    const r = JSON.parse(await res.text()); if(r && r.estado === "ok") return true; AD.cb.msg.push((r && r.msg) || "No se guardó la carpeta."); }
+  catch(err){ AD.cb.msg.push("Sin conexión: la carpeta no se guardó. Intenta de nuevo."); }
+  return false;
+}
+async function admCarHecho(ps, txt){
+  ps.forEach(p => { AD.cb.hechos[p.p] = 1; }); admBadge(); admRender();
+  const deshaz = async () => { ps.forEach(p => { delete AD.cb.hechos[p.p]; }); admRender(); if(await admCarMarca(ps, "pendiente")) admToast("Vuelve a la lista"); else admRender(); };
+  admToast(txt, deshaz);
+  if(!(await admCarMarca(ps, "anotado"))){ ps.forEach(p => { delete AD.cb.hechos[p.p]; }); admRender(); }
+}
+function admPicker(){
+  const np = (AD.cb.d && AD.cb.d.np) || [], q = admNorm(AD.cb.q);
+  const L = np.filter(n => admVenOk(n.ven) && (!q || admNorm(n.num + " " + n.cn + " " + n.ven).indexOf(q) >= 0)).sort((a, b) => b.f - a.f).slice(0, 40);
+  return L.length ? L.map(n => { const tar = (S.ntar && S.ntar[n.id]) || admTarifa(n.ln); return `<button class="adpk" data-ad="cbnota" data-id="${esc(n.id)}"><span><b class="bs">${esc(n.num)}</b> ${tar === "b" ? `<span class="tg">BCV</span>` : ""}${n.fac ? ` <span class="tg fa">FACTURA ${esc(n.fac[0])}</span>` : ""}<br><span>${esc(n.cn)}</span><small>${esc(admVenTxt(n.ven))}${n.pc.length ? " · " + n.pc.length + " por registrar" : ""}</small></span>
+      <span class="num">${money(n.pen)}<small>pendiente en Holded</small></span></button>`; }).join("") : `<div class="box"><p class="hint">${np.length ? "No hay notas pendientes con esa búsqueda." : "Cargando notas…"}</p></div>`;
+}
+function admCobros(){
+  const d = AD.cb.d, msgs = AD.cb.msg.map((m, i) => `<div class="msg">${esc(m)} <button class="txt" data-ad="cbmsg" data-i="${i}">Entendido</button></div>`).join("");
+  if(AD.cb.pick) return `<button class="txt" data-ad="cbpickx" style="justify-self:start">‹ Volver a cobros</button><h2 class="bs">Registrar un cobro</h2>
+    <p class="hint">Elige la nota. El recibo sale con la serie A- y el pago se registra en Holded de una vez.</p>
+    <label class="rcq"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+      <input type="search" id="admQ" aria-label="Buscar nota o cliente" placeholder="Nota o cliente" autocomplete="off" value="${esc(AD.cb.q)}"></label>${msgs}<div id="admPk" class="adpkl">${admPicker()}</div>`;
+  if(!d) return admTasaHtml() + msgs + `<div class="box"><p class="hint">${esc(AD.cb.err || "Cargando cobros…")}</p></div>`;
+  const regs = admCobRegs(d).filter(c => admVenOk(c.ven)).sort((a, b) => a.t - b.t), difs = admCobDifs(d).filter(c => admVenOk(c.ven)), arch = (d.arch || []).filter(p => admVenOk(p.ven));
+  const car = (d.car || []).filter(p => !AD.cb.hechos[p.p] && admVenOk(p.ven)), nCar = new Set(car.map(p => p.n)).size;
+  let h = admTasaHtml() + `<div class="achips" role="group" aria-label="Cobros">${[["reg", "Por registrar " + regs.length], ["dif", "Con diferencia " + (difs.length + arch.length)], ["car", "Por anotar " + nCar]].map(([k, l]) => `<button class="achip" data-ad="cbsub" data-k="${k}" aria-pressed="${AD.cb.sub === k}">${l}</button>`).join("")}</div>`;
+  h += (AD.cb.err ? `<div class="msg">${esc(AD.cb.err)}</div>` : "") + msgs;
+  if(AD.cb.sub === "reg"){
+    h += `<div class="adhd"><h2 class="bs">POR REGISTRAR EN HOLDED</h2><p class="hint">Mira que el dinero haya entrado y regístralo. Cada cobro sale de aquí cuando Holded lo tiene.</p></div>
+      <button class="ghost" data-ad="cbnew">+ REGISTRAR UN COBRO</button>`;
+    h += regs.length ? regs.map(admRegCard).join("") : `<div class="adok">No hay cobros por registrar.</div>`;
+  } else if(AD.cb.sub === "dif"){
+    h += `<div class="adhd"><h2 class="bs">CON DIFERENCIA</h2><p class="hint">Cobros cuya cuenta o monto en Holded no coincide con el recibo, y pagos que quedaron en una cuenta archivada.</p></div>`;
+    h += difs.length || arch.length ? difs.map(admDifCard).join("") + arch.map(admArchCard).join("") : `<div class="adok">Nada con diferencia.</div>`;
+  } else {
+    h += `<div class="adhd"><h2 class="bs">POR ANOTAR EN CARPETA</h2><p class="hint">Pagos que ya están en Holded. Anótalos en la copia de cada nota y márcala. Se quedan aquí hasta que los marques, aunque pasen semanas.</p></div>` + admCarHtml(car);
+  }
+  return h;
+}
+/* el formulario del cobro de administración (y su pantalla de «guardado») se pinta dentro de ADMIN */
+function admCobForm(el){
+  const av = CB.avisos.length ? CB.avisos.map((a, i) => `<div class="msg">${esc(a)} <button class="txt" data-cb="avok" data-i="${i}">Entendido</button></div>`).join("") : "";
+  if(CB.ok){ el.innerHTML = av + cbOkHtml() + admRegOk(); cbRecPinta(CB.ok.cobro); return true; }
+  if(!CB.nota || !CB.adNota) return false;
+  if(CB.adNota[8] === "?"){ const x = CB.adX || {};
+    el.innerHTML = `<button class="txt" data-cb="volver" style="justify-self:start">‹ Volver a cobros</button><h2 class="bs">Nota ${esc(CB.adNota[1])}</h2>
+      <div class="box"><b>${esc(x.cn || "")}</b><p class="hint">No pude saber si esta nota es en tasa BCV o en dólares (es muy nueva). ¿Cuál es?</p>
+      <div class="adbt"><button class="ghost" data-ad="cbtar" data-k="u">Nota en dólares</button><button class="ghost" data-ad="cbtar" data-k="b">Nota BCV</button></div></div>`; return true; }
+  const h = cbFormHtml(); if(!h) return false;
+  el.innerHTML = av + h; if($("cbSum")) cbSum(); return true;
+}
+function admRegOk(){
+  const o = CB.ok, c = o && o.cobro; if(!c || !c.ad) return "";
+  const g = o.reg;
+  if(c.est === "cola") return `<div class="msg">Cuando el cobro llegue al servidor se registra solo en Holded.</div>`;
+  if(g && g.ok) return `<div class="okb"><b>Registrado en Holded</b>${esc(g.msg || "")}</div>` + (g.aviso ? `<div class="msg">${esc(g.aviso)}</div>` : "");
+  if(g && g.ya) return `<div class="okb"><b>Ya estaba en Holded</b>${esc(g.msg || "")}</div>`;
+  return `<div class="msg">No se registró en Holded${g && (g.msg || g.error) ? ": " + esc(g.msg || g.error) : ""}. Quedó en «Por registrar» para que lo revises.</div>`;
+}
+async function admCobAccion(a, ex, ok){
+  AD.cb.busy = ex.id || ""; admRender();
+  let r = null; try{ r = await admSrv(a, ex); }catch(e){ AD.cb.msg.push("Sin conexión: no se hizo. Intenta de nuevo."); }
+  AD.cb.busy = ""; AD.cb.conf = ""; AD.cb.anular = "";
+  if(r && r.estado === "ok"){ if(ok) ok(r); } else if(r) AD.cb.msg.push(r.msg || "No se pudo.");
+  await admCobCarga(true); admRender();
+}
+async function admVerCap(id){
+  const ov = document.createElement("div"); ov.id = "rcOv"; ov.innerHTML = `<button class="rcx" aria-label="Cerrar">Cerrar</button><div class="rcim"><p>Cargando la captura…</p></div>`; document.body.appendChild(ov);
+  const cierra = () => ov.remove(); ov.querySelector(".rcx").addEventListener("click", cierra); ov.addEventListener("click", e => { if(e.target === ov) cierra(); });
+  try{ const r = await admSrv("adcap", { id }); ov.querySelector(".rcim").innerHTML = r && r.estado === "ok" && r.b64 ? `<img alt="Captura del pago" src="data:${esc(r.tipo)};base64,${r.b64}">` : `<p>${esc((r && r.msg) || "No se pudo cargar la captura.")}</p>`; }
+  catch(e){ ov.querySelector(".rcim").innerHTML = `<p>Sin conexión: no se pudo cargar la captura.</p>`; }
+}
+$("vCob").addEventListener("click", e => {
+  const a = e.target.closest("[data-ad]"); if(!a || VISTA !== "admin") return; const k = a.dataset.ad, id = a.dataset.id, d = AD.cb.d;
+  if(k === "cbsub"){ AD.cb.sub = a.dataset.k; AD.cb.conf = ""; admRender(); }
+  else if(k === "cbreg"){ AD.cb.conf = id; AD.cb.anular = ""; admRender(); }
+  else if(k === "cbno"){ AD.cb.conf = ""; AD.cb.anular = ""; admRender(); }
+  else if(k === "cbsi"){ const c = d && d.cob.find(x => x.id === id);
+    admCobAccion("adreg", { id }, r => { const g = r.reg || {};
+      if(g.ok){ admToast((c ? c.rec + " " : "") + "registrado en Holded"); if(g.aviso) AD.cb.msg.push(g.aviso); }
+      else if(g.ya) admToast(g.msg || "Ya estaba en Holded");
+      else if(g.alto) AD.cb.msg.push(g.msg); }); }
+  else if(k === "cbcap") admVerCap(id);
+  else if(k === "cbrev") admCobAccion("adrev", { id, e:"revisar" }, r => { if(r.sigue) AD.cb.sigue[id] = 1; else { delete AD.cb.sigue[id]; admToast("Corregido: ya coincide"); } });
+  else if(k === "cbacep") admCobAccion("adrev", { id, e:"aceptar" }, () => { delete AD.cb.sigue[id]; admToast("Se queda así"); });
+  else if(k === "cbconf") admCobAccion("adrev", { id, e:"confirmar" }, () => admToast("Confirmado"));
+  else if(k === "cbanu"){ AD.cb.anular = id; AD.cb.conf = ""; admRender(); }
+  else if(k === "cbanusi") admCobAccion("adrev", { id, e:"anular" }, () => admToast("Recibo anulado"));
+  else if(k === "cbmsg"){ AD.cb.msg.splice(Number(a.dataset.i), 1); admRender(); }
+  else if(k === "cbnew"){ AD.cb.pick = true; AD.cb.q = ""; admRender(); window.scrollTo(0, 0); }
+  else if(k === "cbpickx"){ AD.cb.pick = false; admRender(); }
+  else if(k === "cbnota") admNotaAbre(id);
+  else if(k === "cbtar"){ if(CB.adX){ CB.adNota = admFilaNota(CB.adX, a.dataset.k); admRender(); } }
+  else if(k === "carn"){ const ps = ((d && d.car) || []).filter(p => p.n === id && !AD.cb.hechos[p.p]); if(ps.length) admCarHecho(ps, ps[0].nn + " anotada"); }
+  else if(k === "carv"){ const ps = ((d && d.car) || []).filter(p => p.ven === a.dataset.k && !AD.cb.hechos[p.p]); if(ps.length) admCarHecho(ps, "Carpeta " + admVenTxt(a.dataset.k) + " al día"); }
+});
+$("vCob").addEventListener("input", e => { if(e.target.id === "admQ"){ AD.cb.q = e.target.value; const L = $("admPk"); if(L) L.innerHTML = admPicker(); } });
+
 /* ---------- eventos ---------- */
 $("vCob").addEventListener("click", async e => {
   const a = e.target.closest("[data-cb]"); if(!a) return; const k = a.dataset.cb, top = () => window.scrollTo(0, 0);
@@ -1066,8 +1298,8 @@ $("vCob").addEventListener("click", async e => {
   else if(k === "rcav") rcAvisar(a.dataset.id);
   else if(k === "solo"){ CB.solo = a.dataset.k === "true"; cobRender(); }
   else if(k === "open"){ CB.msgOk = ""; CB.nota = a.dataset.id; CB.edit = null; CB.del = null; CB.f = cbF0(); CB.err = ""; CB.cap = null; CB.mpOn = false; CB.bsOn = false; CB.tbMan = false; cobRender(); top(); }
-  else if(k === "volver"){ CB.nota = null; CB.edit = null; CB.del = null; CB.cap = null; cobRender(); }
-  else if(k === "listo"){ CB.ok = null; cobRender(); top(); }
+  else if(k === "volver"){ if(CB.adNota && VISTA === "admin") admNotaCierra(); CB.nota = null; CB.edit = null; CB.del = null; CB.cap = null; cobRender(); }
+  else if(k === "listo"){ const ad = CB.ok && CB.ok.cobro && CB.ok.cobro.ad; CB.ok = null; if(ad){ admNotaCierra(); AD.cb.pick = false; AD.cb.sub = "reg"; admCobCarga(true); } cobRender(); top(); }
   else if(k === "guardar") cbGuardar();
   else if(k === "capsel"){ const f = $("cbCapF"); if(f) f.click(); }
   else if(k === "mpon"){ CB.mpOn = true; cobRender(); }

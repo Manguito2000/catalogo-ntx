@@ -75,6 +75,8 @@ for n in notas:
     bcv = (round(pen / (1 - d / 100), 2) if d > 0 else pen) if t == 'b' else None   # lo que falta en dólares a tasa BCV
     nt.setdefault(tagcl.get(n.get('contact'), ''), []).append([n['id'], n['docNumber'], n.get('contact'), n.get('date'), n.get('dueDate') or None,
         round(float(n.get('total') or 0), 2), round(float(n.get('paymentsTotal') or 0), 2), pen, t, d, real, bcv, pag, factura(n.get('tags'))])
+corte150 = datetime.datetime.now().timestamp() - 150 * 86400
+ntar = {n['id']: tarifa(n) for n in notas if not n.get('draft') and n.get('docNumber') and (float(n.get('paymentsPending') or 0) >= 0.01 or any((y.get('date') or 0) >= corte150 for y in (n.get('paymentsDetail') or [])))}
 assert len(notas) > 100, 'Holded devolvió muy pocas notas; no se toca datos.json'
 ahora = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'); b64 = lambda b: base64.b64encode(b).decode(); blobs = []
 VJ = json.load(open(a.vendedores, encoding='utf-8'))
@@ -83,7 +85,7 @@ for v in VJ['v']:
     cod = re.sub(r'[^A-Z0-9]', '', (v['codigo'] + v['s']).upper()); salt, iv = os.urandom(16), os.urandom(12)
     key = hashlib.pbkdf2_hmac('sha256', cod.encode(), salt, 150000, 32)
     data = dict(v=dict(k=v['k'], nombre=v['nombre'], tag=v['tag']), fecha=ahora, p=precios, nuevo=NUEVO, cl=[r for r in cl if r[2] == v['tag']], nt=sorted(nt.get(v['tag'], []), key=lambda r: r[3] or 0))
-    if v['tag'] == 'rm' and ADM: data['adm'] = ADM
+    if v['tag'] == 'rm' and ADM: data['adm'] = ADM; data['ntar'] = ntar   # tarifa de las notas de todos: ADMIN › Cobros (equivalente BCV en la carpeta y cobro de administración)
     blobs.append(dict(s=b64(salt), i=b64(iv), d=b64(AESGCM(key).encrypt(iv, json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode(), None))))
     print(v['tag'], len(data['cl']), 'clientes ·', sum(1 for r in data['nt'] if r[7] >= 0.01), 'notas pendientes')
 json.dump(dict(fecha=ahora, v=blobs), open(a.salida, 'w', encoding='utf-8'), separators=(',', ':'))

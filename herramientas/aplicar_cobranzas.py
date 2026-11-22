@@ -51,7 +51,13 @@ PARES2 = [
  ('j', RC_OLD, 'else if(!(document.activeElement && document.activeElement.matches("input,textarea"))) cobRender(); }\n  if(v === "admin"){ if(prev !== "admin") admAbre(); else if(!(document.activeElement && document.activeElement.matches("input,textarea"))) admRender(); }', 'route: render admin'),
  ('j', 'S.nt = d.nt || []; purgaSinStock();', 'S.nt = d.nt || []; S.adm = d.adm || ""; purgaSinStock();', 'unlock: llave de administración'),
 ]
+# Fase 3 (ADMIN › Cobros, 22 nov 2026): tarifa de las notas de todos para administración
+PARES3 = [
+ ('j', 'S.adm = d.adm || "";', 'S.adm = d.adm || ""; S.ntar = d.ntar || {};', 'unlock: tarifas de las notas'),
+]
 T = {'h': h, 'j': j}
+for k, a, b, que in PARES3:      # se deshace primero lo más nuevo
+    while b in T[k]: T[k] = T[k].replace(b, a)
 for k, a, b, que in PARES2:      # primero se deshace la fase 2 (si ya estaba aplicada), luego la fase 1
     while b in T[k]: T[k] = T[k].replace(b, a)
 for lista in (PARES, VIEJOS):
@@ -62,6 +68,9 @@ for k, a, b, que in PARES:
     T[k] = T[k].replace(a, b)
 for k, a, b, que in PARES2:
     assert T[k].count(a) == 1, 'no encontré (fase 2): ' + que
+    T[k] = T[k].replace(a, b)
+for k, a, b, que in PARES3:
+    assert T[k].count(a) == 1, 'no encontré (fase 3): ' + que
     T[k] = T[k].replace(a, b)
 h, j = T['h'], T['j']
 # Tema: el rojo de marca sirve de fondo (botones), pero como letra sobre negro se lee mal de noche.
