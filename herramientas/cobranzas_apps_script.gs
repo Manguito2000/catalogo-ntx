@@ -6,10 +6,17 @@
 //   ?a=anular  el vendedor anula un cobro suyo que aún no esté confirmado
 //   conciliarCobros()  corre sola cada hora: mira Holded (solo lectura) y confirma los cobros cuyos pagos ya registró administración
 //   instalarCobranzas()  se ejecuta UNA vez a mano: crea la hoja "Cobranzas NTX" y el reloj de cada hora
+//   POST a=cap      el teléfono sube la captura del pago de un cobro (carpeta de Drive "Comprobantes NTX"; enlace en la columna Captura)
+//   Tasa BCV        cada pocas horas (desde la conciliación) se lee la tasa oficial (bcv.org.ve; si falla, ve.dolarapi.com) y se guarda
+//                   por fecha valor en la hoja "Tasas BCV". El portal la usa para pasar los bolívares de una captura a dólares BCV.
 // Solo LEE Holded. Nunca registra pagos ni cambia nada allá.
 var COB_COLS = ["Recibo", "Fecha", "Vendedor", "Cliente", "Nota", "Cobrado $", "Abono real $", "Efectivo $", "USDT $", "Zelle $", "Bs (en $)", "Tasa", "Referencia",
   "Estado", "Observación", "Confirmado el", "ts", "tag", "notaId", "uid", "base", "pagos", "dispositivo",
-  "Tarifa", "Desc. divisas %", "Abono a la nota $", "Factura"];   // columnas nuevas al final (nov 2026): BCV o USD, descuento por pago en divisas, abono en dólares de la nota, factura AdriMan de la nota
+  "Tarifa", "Desc. divisas %", "Abono a la nota $", "Factura",    // columnas nuevas al final (nov 2026): BCV o USD, descuento por pago en divisas, abono en dólares de la nota, factura AdriMan de la nota
+  "Mercantil Panamá $", "IVA cobrado $", "Monto Bs", "Tasa BCV", "Fecha del pago", "Cuenta destino", "Destino leído", "Cuenta Holded", "Captura", "Lectura", "Avisos"];
+// (22 nov 2026) captura del pago: lo que leyó el teléfono, la cuenta de la empresa a la que se pagó, el IVA que vino con el pago (no va a Holded)
+// y la cuenta de Holded donde debe registrarse cada forma de pago. Las columnas de antes no se mueven.
+var CUENTA_HOLDED = { ef: "CAJA CHICA", us: "USDT", ze: "NUEVO ZELLE", mp: "MERCANTIL PANAMÁ", bs: "Caja para Operaciones en Tránsito", bsFac: "Bolivares Cuenta Juridica" };
 
 /* Descuento BCV (%): un solo número para todo el sistema, en config.json del repositorio del portal. Se lee cada 10 minutos; si no responde, 15. */
 function descuentoBcv() {
@@ -37,9 +44,17 @@ function cobranzas(q) {
     if (q.a === "ret") return fcRetencion(tag, fcLee(q.x), "");
     var vivo = null; try { vivo = saldosVivos(q.ids); } catch (e2) {}          // si Holded falla, los cobros se devuelven igual
     var fx = { sol: [], ret: {} }; try { fx = fcDelVendedor(tag); } catch (e3) {}
-    return { estado: "ok", cobros: cobrosDe(tag), nt: vivo, sol: fx.sol, ret: fx.ret };
+    var tasas = []; try { tasas = tasasRecientes(); } catch (e4) {}
+    return { estado: "ok", cobros: cobrosDe(tag), nt: vivo, sol: fx.sol, ret: fx.ret, tasas: tasas };
   } catch (err) { return { estado: "error", msg: String(err && err.message || err) }; }
 }
+/* cuenta de Holded donde administración debe registrar cada parte del cobro (cuentas ACTIVAS; los bolívares de notas con factura van a la jurídica) */
+function cuentaHolded(ef, us, ze, mp, bsNeto, fac) {
+  var o = []; if (ef > 0) o.push(CUENTA_HOLDED.ef); if (us > 0) o.push(CUENTA_HOLDED.us); if (ze > 0) o.push(CUENTA_HOLDED.ze); if (mp > 0) o.push(CUENTA_HOLDED.mp);
+  if (bsNeto > 0.009) o.push(fac ? CUENTA_HOLDED.bsFac : CUENTA_HOLDED.bs);
+  return o.join(" + ");
+}
+function refNorm(r) { return String(r || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
 // Mismo control que el portero: código correcto, vendedor no bloqueado y dispositivo ya aprobado.
 function vendedorDe(q) {
   var cod = String(q.cod || "").toUpperCase().replace(/[^A-Z0-9]/g, ""), disp = String(q.d || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 40);
@@ -57,19 +72,22 @@ function cobroNuevo(tag, q) {
   try { c = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(b64)).getDataAsString("UTF-8")); } catch (e) { return { estado: "error", msg: "No se pudo leer el cobro" }; }
   var num = function (x) { x = Math.round((Number(x) || 0) * 100) / 100; return x > 0 && x < 1e6 ? x : 0; };
   var uid = String(c.id || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 40), nid = String(c.n || "").replace(/[^a-f0-9]/g, "");
-  var ef = num(c.ef), us = num(c.us), ze = num(c.ze), bs = num(c.bs), nom = Math.round((ef + us + ze + bs) * 100) / 100, ab = num(c.ab);
+  var ef = num(c.ef), us = num(c.us), ze = num(c.ze), mp = num(c.mp), bs = num(c.bs), nom = Math.round((ef + us + ze + mp + bs) * 100) / 100, ab = num(c.ab), div = ef + us + ze + mp;
   if (uid.length < 8 || nid.length !== 24) return { estado: "error", msg: "Cobro incompleto" };
   if (nom <= 0) return { estado: "error", msg: "El monto debe ser mayor que cero" };
   // El abono real solo puede ser menor que lo cobrado por la parte en bolívares de una nota BCV (x 0,85).
   var F = 1 - descuentoBcv() / 100, tb = c.tb === "b", dd = tb ? Math.max(0, Math.min(50, Number(c.dd) || 0)) : 0;
-  var bv = tb ? Math.round((bs + (ef + us + ze) / (1 - dd / 100)) * 100) / 100 : nom;   // abono en dólares de la nota (BCV o USD)
-  if (ab > nom + 0.01 || ab < ef + us + ze + bs * (tb ? F : 1) - 0.02) return { estado: "error", msg: "El abono no cuadra con lo cobrado" };
+  var iv = tb ? Math.min(bs, num(c.iv)) : 0;                                            // IVA que vino con el pago (solo notas facturadas, sale de los bolívares)
+  var bv = tb ? Math.round((bs - iv + div / (1 - dd / 100)) * 100) / 100 : nom;          // abono en dólares de la nota (BCV o USD), sin el IVA
+  if (ab > nom + 0.01 || ab < div + (bs - iv) * (tb ? F : 1) - 0.02) return { estado: "error", msg: "El abono no cuadra con lo cobrado" };
   var lock = LockService.getScriptLock(); lock.waitLock(25000);
   try {
     var hoja = hojaCobros(), filas = leerCobros(hoja);
     for (var i = 0; i < filas.length; i++) if (filas[i].uid === uid) return { estado: "ok", repetido: true, cobro: vista(filas[i]) };   // reenvío del mismo cobro
     var nota = holded("documents/invoice/" + nid), cont = holded("contacts/" + nota.contact);
     if (((cont.tags || [""])[0] || "") !== tag) return { estado: "error", msg: "Esa nota no es de un cliente de tu cartera" };
+    var fac0 = fcDeTags(nota.tags);
+    if (iv > 0 && !fac0) return { estado: "error", msg: "Esta nota no tiene factura: el pago no puede llevar IVA" };
     // Todo se compara en dólares de la nota: en una nota BCV, lo que falta en Holded (reales) se lleva a dólares BCV con el descuento de la nota
     var pend = Number(nota.paymentsPending) || 0, dn = Number(nota.discount) || 0;
     var pendN = tb ? (dn > 0 ? pend / (1 - dn / 100) : pend) : pend;
@@ -90,12 +108,24 @@ function cobroNuevo(tag, q) {
     pon("Bs (en $)", bs || ""); pon("Tasa", num(c.ta) || ""); pon("Referencia", String(c.rf || "").replace(/^[=+@-]+/, "").slice(0, 120)); pon("Estado", "cobrado");
     pon("ts", Math.floor(ahora.getTime() / 1000)); pon("tag", tag); pon("notaId", nid); pon("uid", uid); pon("base", JSON.stringify(base)); pon("pagos", "[]");
     pon("Tarifa", tb ? "BCV" : "USD"); pon("Desc. divisas %", dd || ""); pon("Abono a la nota $", bv);
+    // captura y datos nuevos (22 nov 2026)
+    var tx = function (v, n) { return String(v || "").replace(/^[=+@-]+/, "").slice(0, n); };
+    var fp = /^\d{4}-\d{2}-\d{2}$/.test(String(c.fp || "")) ? String(c.fp) : "", ct = tx(c.ct, 20), cd = tx(c.cd, 60), avisos = [];
+    pon("Mercantil Panamá $", mp || ""); pon("IVA cobrado $", iv || ""); pon("Monto Bs", num(c.bsb) || ""); pon("Tasa BCV", Number(c.tbc) > 0 ? Number(c.tbc) : "");
+    pon("Fecha del pago", fp ? "'" + fp : ""); pon("Cuenta destino", ct === "?" ? "no reconocida" : ct); pon("Destino leído", cd); pon("Lectura", tx(c.lx, 160));
+    pon("Cuenta Holded", cuentaHolded(ef, us, ze, mp, bs - iv, !!fac0));
+    if (ct === "?") avisos.push("La captura no muestra una cuenta de la empresa" + (cd ? " (" + cd + ")" : ""));
+    var rfn = refNorm(c.rf);
+    if (rfn.length >= 6) filas.forEach(function (f) { if (f.estado !== "anulado" && refNorm(f.ref) === rfn) avisos.push("Referencia repetida: ya está en el recibo " + f.recibo + " (" + f.vendedor + ", nota " + f.nota + ")"); });
+    if (avisos.length) pon("Avisos", avisos.join(" · "));
+    if (ab < 0.01 && iv > 0) { pon("Estado", "confirmado"); pon("Observación", "Solo IVA: no se registra en Holded"); pon("Confirmado el", fecha(ahora.toISOString())); }   // nada que conciliar
     var fac = fcDeTags(nota.tags); if (fac) pon("Factura", "'" + fac[0]);   // el pago de una nota facturada se registra con su número de factura
     pon("dispositivo", corto(String(q.d || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 40)));
     hoja.appendRow(fila);
     props.setProperty("COB_N_" + tag, String(n));
     var f = leerCobros(hoja).filter(function (x) { return x.uid === uid; })[0];
-    return { estado: "ok", cobro: vista(f), saldoHolded: pend };
+    var aviso = avisos.filter(function (a) { return /^Referencia repetida/.test(a); })[0];
+    return { estado: "ok", cobro: vista(f), saldoHolded: pend, aviso: aviso ? aviso + ". Si es un mismo pago repartido en dos notas, está bien; si no, revísalo." : "" };
   } finally { lock.releaseLock(); }
 }
 function cobroAnular(tag, q) {
@@ -113,7 +143,10 @@ function cobrosDe(tag) {
   var corte = Date.now() / 1000 - 7 * 86400;
   return leerCobros(hojaCobros()).filter(function (f) { return f.tag === tag && (f.estado === "cobrado" || f.estado === "revisar" || f.ts >= corte); }).map(vista);
 }
-function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos, dd: f.dd, bv: f.bv || null, tb: f.tarifa === "BCV" ? "b" : "", fa: f.fa || "" }; }
+function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, mp: f.mp, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos, dd: f.dd, bv: f.bv || (f.bv === 0 && f.iv ? 0 : null), tb: f.tarifa === "BCV" ? "b" : "", fa: f.fa || "",
+  iv: f.iv, bsb: f.bsb, tbc: f.tbc, fp: f.fp, ct: f.ct, cap: f.cap ? 1 : 0, av: f.av }; }
+/* fecha aaaa-mm-dd de una celda (texto o fecha de la hoja) */
+function ymd(v) { if (v instanceof Date) return Utilities.formatDate(v, "America/Caracas", "yyyy-MM-dd"); var s = String(v || "").replace(/^'/, ""); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ""; }
 
 /* Saldos al momento: el teléfono manda los ids de las notas que tiene (?ids=a,b,c) y recibe cómo están AHORA en Holded:
    { id: [total, pagado, pendiente, descuento %, [[idPago, monto, fecha]], [factura, iva] | null] }. Así una nota cobrada en administración deja de salirle
@@ -161,6 +194,7 @@ function conciliarCobros() {
       });
     });
     try { fcMarcarEmitidas(); } catch (e4) {}                                   // solicitudes de factura ya emitidas (etiqueta fac###### en la nota)
+    try { tasaBcvAlDia(); } catch (e5) {}                                       // tasa BCV para el portal (cada 3 horas)
     if (avisos.length) aviso("cobros por revisar (" + avisos.length + ")", "Estos cobros anotados por los vendedores no se pudieron confirmar solos contra Holded:\n\n" + avisos.join("\n\n") +
       "\n\nEn la hoja puedes escribir \"confirmado\" o \"anulado\" en la columna Estado para resolverlos a mano:\n" + hoja.getParent().getUrl());
     return hechos + " confirmados, " + avisos.length + " por revisar";
@@ -183,7 +217,9 @@ function leerCobros(hoja) {
       nominal: N(r[COB["Cobrado $"]]), abono: N(r[COB["Abono real $"]]), ef: N(r[COB["Efectivo $"]]), us: N(r[COB["USDT $"]]), ze: N(r[COB["Zelle $"]]), bs: N(r[COB["Bs (en $)"]]),
       tasa: N(r[COB["Tasa"]]), ref: String(r[COB["Referencia"]]), estado: String(r[COB["Estado"]]).trim().toLowerCase(), obs: String(r[COB["Observación"]]),
       tarifa: String(r[COB["Tarifa"]] || ""), fa: String(r[COB["Factura"]] || ""), dd: N(r[COB["Desc. divisas %"]]), bv: N(r[COB["Abono a la nota $"]]),
-      ts: N(r[COB["ts"]]), tag: String(r[COB["tag"]]), notaId: String(r[COB["notaId"]]), uid: String(r[COB["uid"]]), base: J(r[COB["base"]]), pagos: J(r[COB["pagos"]]) });
+      ts: N(r[COB["ts"]]), tag: String(r[COB["tag"]]), notaId: String(r[COB["notaId"]]), uid: String(r[COB["uid"]]), base: J(r[COB["base"]]), pagos: J(r[COB["pagos"]]),
+      mp: N(r[COB["Mercantil Panamá $"]]), iv: N(r[COB["IVA cobrado $"]]), bsb: N(r[COB["Monto Bs"]]), tbc: N(r[COB["Tasa BCV"]]), fp: ymd(r[COB["Fecha del pago"]]),
+      ct: String(r[COB["Cuenta destino"]] || ""), ch: String(r[COB["Cuenta Holded"]] || ""), cap: String(r[COB["Captura"]] || ""), av: String(r[COB["Avisos"]] || "") });
   }
   return out;
 }
@@ -396,6 +432,7 @@ function fcDelVendedor(tag) {
 function doPost(e) {
   try {
     var b = JSON.parse((e && e.postData && e.postData.contents) || "{}");
+    if (b.a === "cap") return json(capturaGuardar(b));
     if (b.a !== "ret") return json({ estado: "error", msg: "Acción desconocida" });
     var tag = vendedorDe(b); if (!tag) return json({ estado: "no", msg: "Dispositivo o código no autorizado" });
     var tipo = String(b.tipo || ""), ext = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" }[tipo];
@@ -413,6 +450,69 @@ function fcCarpeta() {
   var props = PropertiesService.getScriptProperties(), id = props.getProperty("COB_RET_DIR");
   if (id) try { return DriveApp.getFolderById(id); } catch (e) {}
   var c = DriveApp.createFolder("Retenciones NTX"); props.setProperty("COB_RET_DIR", c.getId()); return c;
+}
+
+/* ---- captura del pago de un cobro: llega por POST {a:"cap", cod, d, x:{id}, tipo, b64} (la imagen ya viene reducida por el teléfono) ---- */
+function capturaGuardar(b) {
+  var tag = vendedorDe(b); if (!tag) return { estado: "no", msg: "Dispositivo o código no autorizado" };
+  var tipo = String(b.tipo || ""), ext = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" }[tipo];
+  if (!ext) return { estado: "error", msg: "Solo se aceptan imágenes" };
+  var bytes = Utilities.base64Decode(String(b.b64 || ""));
+  if (bytes.length < 200 || bytes.length > 6 * 1024 * 1024) return { estado: "error", msg: "La imagen está vacía o pesa más de 6 MB" };
+  var uid = String((b.x || {}).id || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 40), lock = LockService.getScriptLock(); lock.waitLock(25000);
+  try {
+    var hoja = hojaCobros(), f = leerCobros(hoja).filter(function (x) { return x.uid === uid && x.tag === tag; })[0];
+    if (!f) return { estado: "error", msg: "No encontré el cobro" };                      // aún no llega: el teléfono lo intenta luego
+    if (f.cap) return { estado: "ok", repetido: true };
+    var nombre = "Captura_" + f.recibo + "_" + f.nota + "_" + fcTxt(f.cliente, 40).replace(/[^\wÁÉÍÓÚÑáéíóúñ .-]/g, "") + "_" +
+      Utilities.formatDate(new Date(), "America/Caracas", "yyyy-MM-dd_HHmm") + "." + ext;
+    var arch = capCarpeta().createFile(Utilities.newBlob(bytes, tipo, nombre));
+    escribir(hoja, f.fila, { "Captura": arch.getUrl() });
+    return { estado: "ok" };
+  } finally { lock.releaseLock(); }
+}
+function capCarpeta() {
+  var props = PropertiesService.getScriptProperties(), id = props.getProperty("COB_CAP_DIR");
+  if (id) try { return DriveApp.getFolderById(id); } catch (e) {}
+  var c = DriveApp.createFolder("Comprobantes NTX"); props.setProperty("COB_CAP_DIR", c.getId()); return c;
+}
+
+/* ---- tasa BCV oficial (Bs por dólar) por fecha valor: hoja "Tasas BCV" del libro de cobranzas ---- */
+var TASA_COLS = ["Fecha valor", "Tasa", "Fuente", "Leída el"];
+function tasaHoja() {
+  var lib = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty("COB_HOJA") || ""), h = lib.getSheetByName("Tasas BCV");
+  if (!h) { h = lib.insertSheet("Tasas BCV"); h.getRange(1, 1, 1, TASA_COLS.length).setValues([TASA_COLS]).setFontWeight("bold"); h.setFrozenRows(1); h.getRange(1, 1, h.getMaxRows(), 1).setNumberFormat("@"); }
+  return h;
+}
+/* Primero la página del BCV (tasa y "Fecha Valor"); si no responde o cambió, ve.dolarapi.com (toma la misma tasa del BCV). */
+function tasaBcvLeer() {
+  var t = null;
+  try {
+    var h = UrlFetchApp.fetch("https://www.bcv.org.ve/", { muteHttpExceptions: true, validateHttpsCertificates: false, followRedirects: true }).getContentText();
+    var m = /id="dolar"[\s\S]*?<strong>\s*([\d.,]+)\s*<\/strong>/.exec(h), f = /Fecha Valor:[\s\S]*?content="(\d{4}-\d{2}-\d{2})/.exec(h);
+    if (m && f) t = { f: f[1], v: Number(m[1].replace(/\./g, "").replace(",", ".")), fu: "bcv.org.ve" };
+  } catch (e) {}
+  if (!t || !(t.v > 0)) try {
+    var j = JSON.parse(UrlFetchApp.fetch("https://ve.dolarapi.com/v1/dolares/oficial", { muteHttpExceptions: true }).getContentText());
+    if (j && Number(j.promedio) > 0) t = { f: String(j.fechaActualizacion || "").slice(0, 10), v: Number(j.promedio), fu: "ve.dolarapi.com" };
+  } catch (e2) {}
+  if (!t || !(t.v > 10) || !/^\d{4}-\d{2}-\d{2}$/.test(t.f)) return null;
+  var hoja = tasaHoja(), filas = hoja.getDataRange().getValues(), i;
+  for (i = 1; i < filas.length; i++) if (ymd(filas[i][0]) === t.f) break;
+  var fila = [t.f, Math.round(t.v * 10000) / 10000, t.fu, fecha(new Date().toISOString())];
+  if (i < filas.length) hoja.getRange(i + 1, 1, 1, fila.length).setValues([fila]); else hoja.appendRow(fila);
+  CacheService.getScriptCache().remove("COB_TASAS");
+  PropertiesService.getScriptProperties().setProperty("COB_TASA_T", String(Date.now()));
+  return t;
+}
+function tasaBcvAlDia() { var u = Number(PropertiesService.getScriptProperties().getProperty("COB_TASA_T") || 0); if (Date.now() - u > 3 * 3600000) tasaBcvLeer(); }
+/* las últimas 60 tasas [[fecha valor, tasa]]: el teléfono escoge la vigente en la fecha de cada pago */
+function tasasRecientes() {
+  var cache = CacheService.getScriptCache(), c = cache.get("COB_TASAS"); if (c) return JSON.parse(c);
+  var filas = tasaHoja().getDataRange().getValues().slice(1).map(function (r) { return [ymd(r[0]), Number(r[1]) || 0]; }).filter(function (r) { return r[0] && r[1] > 0; });
+  if (!filas.length && tasaBcvLeer()) return tasasRecientes();                      // primera vez: se lee en el momento
+  filas.sort(function (a, b) { return a[0] < b[0] ? -1 : 1; }); filas = filas.slice(-60);
+  cache.put("COB_TASAS", JSON.stringify(filas), 600); return filas;
 }
 
 /* ---- cada hora (desde conciliarCobros): solicitudes cuya nota ya tiene factura ---- */

@@ -9,7 +9,8 @@ Catálogo de motores, aspas, bobinas, carboneras, conectores y relays NTX para v
 
 ## Herramientas
 - `herramientas/refrescar_datos.py`: refresca `datos.json` desde Holded (tarea automática).
-- `herramientas/cobranzas_pagina.js/.css` + `aplicar_cobranzas.py`: pestañas Cobranzas y ADMIN (bandeja de pedidos, presupuestos y facturas de Mango). Flujo: `portal.py abrir` → `aplicar_cobranzas.py` → `aplicar_jalar.py` → `portal.py armar`.
+- `herramientas/cobranzas_pagina.js/.css` + `aplicar_cobranzas.py`: pestañas Cobranzas y ADMIN (bandeja de pedidos, presupuestos y facturas de Mango). Flujo: `portal.py abrir` → `aplicar_cobranzas.py plano.json V.json` (inyecta también las cuentas que reconoce el lector de capturas) → `aplicar_jalar.py` → `portal.py armar`.
+- `ocr/`: lector de capturas de pago (Tesseract.js) que usa la pestaña Cobranzas en el teléfono del vendedor.
 - `herramientas/aplicar_jalar.py`: agrega «jalar para actualizar» (se aplica sobre el plano antes de armar).
 - `herramientas/portal.py`: abre `index.html` para editar el catálogo y lo vuelve a armar cifrado.
 - `herramientas/receptor_apps_script.gs`: plantilla del receptor (portero de dispositivos y panel). Los valores secretos no están en este repositorio.

@@ -122,4 +122,17 @@ header.top,.nav,.bar{will-change:transform}
 #admToast{position:fixed;left:50%;width:max-content;bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:30;max-width:calc(100vw - 28px);display:flex;align-items:center;gap:14px;background:var(--ink);color:var(--bg);border-radius:12px;padding:11px 14px;font-weight:700;font-size:14px;box-shadow:0 6px 22px rgba(0,0,0,.28);opacity:0;transform:translate(-50%,10px);pointer-events:none;transition:opacity .2s ease,transform .2s ease}
 #admToast.on{opacity:1;transform:translate(-50%,0);pointer-events:auto}
 #admToast button{color:var(--bg);font-weight:800;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}
+/* captura del pago: miniatura + lo que leyó el teléfono; fila de bolívares (monto en Bs, tasa, fecha) */
+.cbcap{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start;margin:4px 0 12px;padding:12px;border:1.5px dashed var(--line);border-radius:12px}
+.cbcap:not(:has(.cbth)){grid-template-columns:minmax(0,1fr)}
+.cbth{width:76px;max-height:150px;object-fit:cover;object-position:top;border-radius:9px;border:1px solid var(--line);background:var(--bg)}
+.cbcapt{display:grid;gap:8px;min-width:0}
+.cbcapt .ghost{margin:0}
+.cbcapt .msg{margin:0}
+.cblx{display:grid;gap:3px}
+.cblx b{font-size:15px}
+.cblx small{color:var(--mut);font-weight:600;font-size:12.5px;overflow-wrap:anywhere}
+.cbbs{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 12px;border-radius:10px;background:var(--bg)}
+.cbbs[hidden]{display:none}
+.cbbs .w2{grid-column:1/-1}
 /*FIN-COBRANZAS*/

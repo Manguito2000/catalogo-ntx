@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Inyecta la pestaña Cobranzas en el plano del portal (el que produce `portal.py abrir`). Se puede repetir: reemplaza el bloque anterior.
-Uso:  python3 herramientas/aplicar_cobranzas.py plano.json      (después: portal.py armar ...)
+Uso:  python3 herramientas/aplicar_cobranzas.py plano.json V.json      (después: portal.py armar ...)
+V.json es el mismo de portal.py: su campo "cuentas" (cuentas de la empresa que reconoce el lector de capturas) se inyecta en el
+catálogo, que va cifrado. Esas cuentas nunca van en el repositorio.
 Tocan: botón «Cobros» en la banda, sección vCob, ruta #cobros, S.nt en unlock(), y el bloque de CSS/JS marcado con /*COBRANZAS*/."""
 import json, os, re, sys
 AQUI = os.path.dirname(os.path.abspath(__file__)); lee = lambda n: open(os.path.join(AQUI, n), encoding='utf-8').read()
@@ -75,5 +77,11 @@ n = bloque(j, '/*COBRANZAS*/', '/*FIN-COBRANZAS*/', js)
 if n is not None: j = n
 else:
     assert j.count(fin) == 1, 'no encontré la línea final'; j = j.replace(fin, js.strip() + '\n' + fin)
+# cuentas de la empresa para el lector de capturas (CB_CTAS): salen de los datos privados, nunca del repositorio
+if len(sys.argv) > 2:
+    C = json.load(open(sys.argv[2], encoding='utf-8')).get('cuentas') or []
+    j, k = re.subn(r'/\*CTAS\*/.*?/\*FIN-CTAS\*/', lambda m: '/*CTAS*/' + json.dumps(C, ensure_ascii=False, separators=(',', ':')).replace('*/', '') + '/*FIN-CTAS*/', j, count=1, flags=re.S)
+    assert k == 1, 'no encontré CB_CTAS en el catálogo'; print('cuentas del lector:', len(C))
+else: print('AVISO: sin V.json el lector de capturas no reconocerá las cuentas de la empresa')
 assert 'cobAbre' in j and h.count('id="vCob"') == 1 and h.count('id="nav"') == 1 and 'btnCob' not in h + j and '.cbs{' in h
 json.dump({'h': h, 'j': j}, open(p, 'w', encoding='utf-8')); print('Cobranzas aplicado:', len(h), len(j))
