@@ -131,23 +131,87 @@ function lxLee(textos, fechaImg){
 }
 const lxCompleto = r => !!(r.met && r.monto > 0 && r.ref && r.fechaDe === "captura");
 /*FIN-LECTOR*/
-/* ---------- captura del pago: se lee en el teléfono (ocr/) y se guarda con el cobro ---------- */
-const OCR = { p:null, w:null, primera:false };
+/* ---------- captura del pago: se lee en el teléfono (ocr/) y se guarda con el cobro ----------
+   El lector (unos 3,6 MB) se baja UNA sola vez por teléfono, en segundo plano poco después de entrar al portal, y queda guardado
+   en el teléfono (Cache Storage; el modelo de español lo guarda el propio lector en IndexedDB). Al abrir Cobranzas se deja listo
+   en memoria, así que al adjuntar una captura solo falta leerla (1–3 s). Si algo de eso falla, se usa el camino normal (red). */
+const OCR_V = "ts511-1";                                   // cambiarlo si cambian los archivos de ocr/ (obliga a bajarlos de nuevo)
+const OCR = { p:null, w:null, baja:null, pct:0, fase:"", t:{} };   // fase: "" · baja (bajando, pct) · prep (iniciando) · listo · error
 const ocrUrl = f => new URL("ocr/" + f, location.href).href;
-/* el lector se baja solo la primera vez que se usa (unos 6 MB); después queda en el teléfono */
+const OCR_SIMD = (() => { try{ return WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])); }catch(e){ return false; } })();
+const OCR_ARCH = [["lib", "tesseract.min.js", 66695], ["wk", "worker.min.js", 123724], ["core", OCR_SIMD ? "tesseract-core-simd-lstm.wasm.js" : "tesseract-core-lstm.wasm.js", 3938500], ["spa", "spa.traineddata.gz", 2100190]];
+const ocrYa = () => { try{ return localStorage.getItem("ntx-ocr") === OCR_V; }catch(e){ return false; } };
+/* baja un archivo contando los bytes (para el %); si la señal se cae y no llega nada en 40 s, se corta */
+async function ocrTrae(url, cada){
+  const ac = window.AbortController ? new AbortController() : null; let pe = null; const vigila = () => { clearTimeout(pe); pe = setTimeout(() => ac && ac.abort(), 40000); };
+  vigila();
+  try{
+    const r = await fetch(url, ac ? { signal:ac.signal } : {}); if(!r.ok) throw new Error("http " + r.status);
+    if(!r.body || !r.body.getReader) return await r.blob();
+    const rd = r.body.getReader(), partes = []; let n = 0;
+    for(;;){ const x = await rd.read(); if(x.done) break; partes.push(x.value); n += x.value.length; cada(n); vigila(); }
+    return new Blob(partes);
+  } finally { clearTimeout(pe); }
+}
+/* los archivos del lector, desde el teléfono si ya están; si no, de la red (y se guardan). Devuelve direcciones locales (blob:) */
+function ocrBaja(){
+  if(OCR.baja) return OCR.baja;
+  OCR.baja = (async () => {
+    const t0 = Date.now(), U = {}, ya = ocrYa(); let c = null;
+    try{ if(window.caches) c = await caches.open("ntx-ocr-" + OCR_V); }catch(e){}
+    const falta = []; for(const a of OCR_ARCH){ if(a[0] === "spa"){ if(!ya) falta.push(a); continue; } const r = c ? await c.match(ocrUrl(a[1])).catch(() => null) : null; if(r) U[a[0]] = URL.createObjectURL(await r.blob()); else falta.push(a); }
+    const tot = falta.reduce((x, a) => x + a[2], 0); let hecho = 0;
+    if(falta.length){ OCR.fase = "baja"; OCR.pct = 0; ocrAviso(); }
+    for(const [k, f, tam] of falta){
+      const b = await ocrTrae(ocrUrl(f), n => { const p = Math.min(99, Math.floor((hecho + Math.min(n, tam)) * 100 / tot)); if(p !== OCR.pct){ OCR.pct = p; ocrAviso(); } });
+      hecho += tam;
+      if(k === "spa") continue;                                // el modelo: el lector lo toma enseguida (caché del navegador) y lo guarda en IndexedDB
+      if(c){ try{ await c.put(ocrUrl(f), new Response(b, { headers:{ "Content-Type":"text/javascript" } })); }catch(e){} }
+      U[k] = URL.createObjectURL(b);
+    }
+    if(falta.length) OCR.t.baja = Date.now() - t0;
+    try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+    try{ if(window.caches) (await caches.keys()).filter(k => /^ntx-ocr-/.test(k) && k !== "ntx-ocr-" + OCR_V).forEach(k => caches.delete(k)); }catch(e){}
+    return U;
+  })();
+  OCR.baja.catch(() => { OCR.baja = null; if(OCR.fase === "baja") OCR.fase = "error"; ocrAviso(); });
+  return OCR.baja;
+}
+const ocrScript = src => new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => { s.remove(); rej(new Error("no cargó")); }; document.head.appendChild(s); });
+/* el lector en memoria. Primero con los archivos guardados en el teléfono; si eso fallara en algún navegador, con las direcciones normales */
 function ocrListo(){
   if(OCR.p) return OCR.p;
-  OCR.primera = !window.Tesseract;
-  OCR.p = new Promise((res, rej) => { if(window.Tesseract) return res(); const s = document.createElement("script"); s.src = ocrUrl("tesseract.min.js"); s.onload = res; s.onerror = () => rej(new Error("no cargó")); document.head.appendChild(s); })
-    .then(() => Tesseract.createWorker("spa", 1, { workerPath:ocrUrl("worker.min.js"), corePath:ocrUrl(""), langPath:ocrUrl("").replace(/\/$/, ""), workerBlobURL:false }))
-    .then(w => (OCR.w = w));
-  OCR.p.catch(() => { OCR.p = null; });
+  OCR.p = (async () => {
+    const U = await ocrBaja(), t0 = Date.now(); OCR.fase = "prep"; ocrAviso();
+    const lang = ocrUrl("").replace(/\/$/, ""); let w = null;
+    try{
+      if(!window.Tesseract) await ocrScript(U.lib || ocrUrl("tesseract.min.js"));
+      if(U.wk && U.core) w = await Promise.race([Tesseract.createWorker("spa", 1, { workerPath:U.wk, corePath:U.core + "#nucleo.js", langPath:lang, workerBlobURL:false }), new Promise((_, rej) => setTimeout(() => rej(new Error("tiempo")), 20000))]);
+    }catch(e){ w = null; }
+    if(!w){ if(!window.Tesseract) await ocrScript(ocrUrl("tesseract.min.js"));
+      w = await Tesseract.createWorker("spa", 1, { workerPath:ocrUrl("worker.min.js"), corePath:ocrUrl(""), langPath:lang, workerBlobURL:false }); OCR.t.red = 1; }
+    OCR.t.ini = Date.now() - t0; OCR.w = w; OCR.fase = "listo"; try{ localStorage.setItem("ntx-ocr", OCR_V); }catch(e){} ocrAviso();
+    return w;
+  })();
+  OCR.p.catch(() => { OCR.p = null; OCR.fase = "error"; ocrAviso(); });
   return OCR.p;
 }
+/* en segundo plano: bajar el lector una vez (no con «ahorro de datos» activo) y, en Cobranzas, dejarlo listo en memoria */
+const ocrPrevio = () => { try{ if(!ocrYa() && !(navigator.connection && navigator.connection.saveData)) ocrBaja().catch(() => {}); }catch(e){} };
+const ocrTibio = () => setTimeout(() => { ocrListo().catch(() => {}); }, 400);
+setTimeout(ocrPrevio, 5000);
+/* texto de espera de cada captura; se actualiza en su sitio (sin redibujar el formulario) */
+const ocrEspera = () => OCR.fase === "baja" ? "Bajando el lector de capturas (solo esta vez): " + OCR.pct + " %" : OCR.fase === "prep" ? "Preparando el lector…" : "Leyendo la captura…";
+function ocrAviso(){
+  document.querySelectorAll(".cbocr").forEach(e => { e.textContent = ocrEspera(); });
+  document.querySelectorAll(".cbocrh").forEach(e => { e.hidden = !(OCR.fase === "baja" || OCR.fase === "prep"); });
+  try{ if(CB.nota && $("cbGo")) cbSum(); }catch(e){}
+}
 const ocrImg = f => new Promise((res, rej) => { const u = URL.createObjectURL(f), im = new Image(); im.onload = () => res(im); im.onerror = () => { URL.revokeObjectURL(u); rej(new Error("imagen")); }; im.src = u; });
-/* lienzo para leer: tal cual, o "preparado" (gris, invertido si la pantalla era oscura, contraste estirado y agrandado si es pequeño) */
+/* lienzo para leer: el lado corto queda en ~1000 px (lo que mejor lee el lector, y rápido); "preparado" = gris, invertido si la
+   pantalla era oscura y contraste estirado, lo que también saca bien el texto sobre recuadros de color */
 function ocrLienzo(im, prep){
-  let k = Math.min(1, 2000 / Math.max(im.width, im.height)); if(prep && im.width * k < 700) k *= 2;
+  let k = Math.min(2, 1000 / Math.min(im.width, im.height)); if(Math.max(im.width, im.height) * k > 4000) k = 4000 / Math.max(im.width, im.height);
   const cv = document.createElement("canvas"); cv.width = Math.round(im.width * k); cv.height = Math.round(im.height * k);
   const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(im, 0, 0, cv.width, cv.height);
   if(!prep) return cv;
@@ -163,15 +227,17 @@ function ocrLienzo(im, prep){
   for(let i = 0; i < a.length; i += 4){ const y = Math.max(0, Math.min(255, Math.round((a[i] - lo) * 255 / span))); a[i] = a[i + 1] = a[i + 2] = y; }
   g.putImageData(d, 0, 0); return cv;
 }
-/* hasta tres lecturas: la captura tal cual; si falta algo, preparada; y si aún falta, buscando texto suelto (los montos grandes) */
+/* primero la captura preparada (casi siempre basta con esa); si falta algo, buscando texto suelto; y por último tal cual */
 async function ocrLee(f, fechaImg){
-  const w = await ocrListo(), im = await ocrImg(f), textos = []; let r = null;
-  for(const [prep, psm] of [[false, "3"], [true, "3"], [true, "11"]]){
-    await w.setParameters({ tessedit_pageseg_mode:psm });
-    textos.push((await w.recognize(ocrLienzo(im, prep))).data.text);
-    r = lxLee(textos, fechaImg); if(lxCompleto(r)) break;
-  }
-  URL.revokeObjectURL(im.src); return r;
+  const w = await ocrListo(), t0 = Date.now(), im = await ocrImg(f), textos = []; let r = null, k = 0;
+  try{
+    for(const [prep, psm] of [[true, "3"], [true, "11"], [false, "3"]]){
+      k++; await w.setParameters({ tessedit_pageseg_mode:psm });
+      textos.push((await w.recognize(ocrLienzo(im, prep))).data.text);
+      r = lxLee(textos, fechaImg); if(lxCompleto(r)) break;
+    }
+  } finally { URL.revokeObjectURL(im.src); }
+  r.ms = Date.now() - t0; r.pas = k; return r;
 }
 const cbRefN = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 /* lo que el vendedor debe revisar después de leer la captura */
@@ -196,21 +262,22 @@ function cbCapAvisos(r, n){
 function cbCapRecalc(n){
   const L = (CB.caps || []).filter(c => c.lec), S = { ze:0, us:0, mp:0, bsb:0 }, set = new Set();
   L.forEach(c => { const r = c.lec, k = r.met === "bs" ? "bsb" : r.met; if(r.monto > 0 && k in S){ S[k] += r.monto; set.add(k); } });
-  (CB.capSet || []).forEach(k => { if(!set.has(k)){ CB.f[k] = ""; if(k === "bsb") CB.f.bs = ""; } });
-  set.forEach(k => { CB.f[k] = cbCom(r2(S[k])); });
+  const man = CB.man || {};                                                       // lo que el vendedor escribió a mano no se toca
+  (CB.capSet || []).forEach(k => { if(!set.has(k) && !man[k]){ CB.f[k] = ""; if(k === "bsb" && !man.bs) CB.f.bs = ""; } });
+  set.forEach(k => { if(!man[k]) CB.f[k] = cbCom(r2(S[k])); });
   set.forEach(k => { if(k !== "bsb") CB.on[k] = true; }); if(set.has("mp")) CB.mpOn = true; if(set.has("bsb")){ CB.bsOn = true; CB.on.bs = true; }
   CB.capSet = Array.from(set);
   const fb = L.find(c => c.lec.met === "bs" && c.lec.fecha), fs = L.map(c => c.lec.fecha).filter(Boolean).sort();
-  if(fb) CB.f.fp = fb.lec.fecha; else if(fs.length) CB.f.fp = fs[fs.length - 1];
+  if(!man.fp){ if(fb) CB.f.fp = fb.lec.fecha; else if(fs.length) CB.f.fp = fs[fs.length - 1]; }
   if(set.has("bsb") && esB(n) && !CB.tbMan){ const t = cbTasaDe(CB.f.fp); if(t) CB.f.tb = cbCom(t, 4); }
-  if(set.has("bsb")) cbBsCalc(n);
+  if(set.has("bsb") && !man.bs) cbBsCalc(n);
   const refs = Array.from(new Set(L.map(c => c.lec.ref).filter(Boolean)));
-  if(refs.length) CB.f.rf = refs.join(" · "); else if(CB.capRf && CB.f.rf === CB.capRf) CB.f.rf = "";
+  if(man.rf){} else if(refs.length) CB.f.rf = refs.join(" · "); else if(CB.capRf && CB.f.rf === CB.capRf) CB.f.rf = "";
   CB.capRf = refs.length ? CB.f.rf : "";
   L.forEach((c, i) => { c.av = cbCapAvisos(c.lec, n); const rf = cbRefN(c.lec.ref);
     if(rf.length >= 6 && L.slice(0, i).some(o => cbRefN(o.lec.ref) === rf)) c.av.push("Esta captura parece la misma que otra que ya adjuntaste."); });
 }
-const cbCapLeyendo = () => (CB.caps || []).some(c => c.est === "leyendo");
+const cbCapLeyendo = () => OCR.fase === "listo" && (CB.caps || []).some(c => c.est === "leyendo");
 const CAPMAX = 4;
 /* bolívares: monto en Bs ÷ tasa (BCV en notas BCV, la acordada en notas USD) = dólares de la nota */
 function cbBsCalc(n){
@@ -220,13 +287,14 @@ function cbBsCalc(n){
 async function cbCapElegida(files){
   const n = cbNotas().find(x => x.id === CB.nota); if(!n || !files || !files.length) return;
   CB.caps = CB.caps || [];
-  const nuevas = Array.from(files).slice(0, Math.max(0, CAPMAX - CB.caps.length)).map((f, i) => ({ f, url:URL.createObjectURL(f), est:"leyendo", primera:!window.Tesseract && i === 0, lec:null, av:[] }));
+  const nuevas = Array.from(files).slice(0, Math.max(0, CAPMAX - CB.caps.length)).map((f, i) => ({ f, url:URL.createObjectURL(f), est:"leyendo", lec:null, av:[] }));
   if(!nuevas.length) return; CB.caps = CB.caps.concat(nuevas); cobRender();
   for(const cap of nuevas){                                                        // una tras otra: el lector es uno solo
     if(CB.caps.indexOf(cap) < 0) continue;
     const d = cap.f.lastModified ? new Date(cap.f.lastModified) : new Date(), fi = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-    try{ const r = await Promise.race([ocrLee(cap.f, fi), new Promise((_, rej) => setTimeout(() => rej(new Error("tiempo")), 60000))]); cap.lec = r; cap.est = "listo"; }
-    catch(e){ cap.est = "error"; }
+    /* sin límite mientras se baja el lector (se ve el %); la lectura en sí tiene 90 s, y si no hay lector, nada se pierde: se llena a mano */
+    try{ await ocrListo(); const r = await Promise.race([ocrLee(cap.f, fi), new Promise((_, rej) => setTimeout(() => rej(new Error("tiempo")), 90000))]); cap.lec = r; cap.est = "listo"; }
+    catch(e){ cap.est = "error"; cap.err = OCR.fase === "error" ? "lector" : String(e && e.message || "error"); }
     if(CB.caps.indexOf(cap) < 0 || CB.nota !== n.id) continue;
     cbCapRecalc(n); if((VISTA === "cobros" || VISTA === "admin") && CB.nota === n.id) cobRender();
   }
@@ -235,12 +303,12 @@ function cbCapQuita(i){
   const n = cbNotas().find(x => x.id === CB.nota), c = (CB.caps || [])[i]; if(!c) return;
   if(c.url) URL.revokeObjectURL(c.url); CB.caps.splice(i, 1); if(n) cbCapRecalc(n); cobRender();
 }
-const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; CB.on = {}; };   // también olvida qué formas de pago se abrieron
+const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; CB.on = {}; CB.man = {}; };   // también olvida qué formas de pago se abrieron
 function cbCapHtml(){
   const L = CB.caps || [], M = { ze:"Zelle", us:"USDT / USDC", bs:"Bolívares", mp:"Mercantil Panamá" };
   const item = (c, i) => { let st = "";
-    if(c.est === "leyendo") st = `<p class="hint"><b>${c.primera ? "Preparando el lector (solo la primera vez, puede tardar)…" : "Leyendo la captura…"}</b></p>`;
-    else if(c.est === "error") st = `<div class="msg">No pude leer esta captura. Llena su monto a mano; la captura igual se guarda con el cobro.</div>`;
+    if(c.est === "leyendo") st = `<p class="hint"><b class="cbocr">${esc(ocrEspera())}</b></p><p class="hint cbocrh"${OCR.fase === "baja" || OCR.fase === "prep" ? "" : " hidden"}>Si tienes apuro, llena los montos a mano: lo que escribas no se cambia.</p>`;
+    else if(c.est === "error") st = `<div class="msg">${c.err === "lector" ? "No pude bajar el lector de capturas (señal débil). Llena el monto a mano; la captura igual se guarda con el cobro. La próxima vez lo intento de nuevo." : "No pude leer esta captura. Llena su monto a mano; la captura igual se guarda con el cobro."}</div>`;
     else if(c.lec){ const r = c.lec;
       st = `<div class="cblx"><b>${mtChip(r.met)}${esc(M[r.met] || "No reconocí la forma de pago")}${r.monto > 0 ? " · " + (r.mon === "Bs" ? "Bs " + r.monto.toLocaleString("es-VE", { minimumFractionDigits:2, maximumFractionDigits:2 }) : money(r.monto)) : ""}</b>
         <small>${[r.fecha ? cbFecha2(r.fecha) : "", r.ref ? "ref. " + esc(r.ref) : "", r.dest ? "a " + esc(r.dest) : ""].filter(Boolean).join(" · ")}</small></div>` + c.av.map(a => `<div class="msg">${esc(a)}</div>`).join(""); }
@@ -596,7 +664,7 @@ function cbVivo(m){
     r[11] = r[8] === "b" ? (v[3] > 0 ? r2(v[2] / (1 - v[3] / 100)) : v[2]) : null; });            // dólares BCV de lo que falta
   CB.vivo = Date.now();
 }
-function cobAbre(){ cbLoad(); CB.nota = null; CB.edit = null; CB.rec = null; CB.ok = null; CB.del = null; CB.tab = CB.tab || "pend"; CB.rc.ficha = null; cobRender(); cobBadge(); cbRefresca(); if(CB.tab === "rc") rcCarga(true); }
+function cobAbre(){ ocrTibio(); cbLoad(); CB.nota = null; CB.edit = null; CB.rec = null; CB.ok = null; CB.del = null; CB.tab = CB.tab || "pend"; CB.rc.ficha = null; cobRender(); cobBadge(); cbRefresca(); if(CB.tab === "rc") rcCarga(true); }
 
 /* ---------- guardar ---------- */
 async function cbGuardar(){
@@ -616,7 +684,8 @@ async function cbGuardar(){
   const o = { id:cbUid(), n:x.n.id, nn:x.n.num, cn:cbCliente(x.n.cid), t:Math.floor(Date.now() / 1000), nom:c.nom, ab:c.ab, bv:c.bv, iv:c.iv, dd:c.dd, tb:esB(x.n) ? "b" : "", ef:c.ef, us:c.us, ze:c.ze, mp:c.mp, bs:c.bs,
     ta:c.bs > 0 && !esB(x.n) ? cbNum(CB.f.ta) : 0, bsb:c.bs > 0 ? cbNum(CB.f.bsb) : 0, tbc:c.bs > 0 && esB(x.n) && cbNum(CB.f.bsb) > 0 ? Number(String(CB.f.tb || "").replace(",", ".")) || 0 : 0,
     fp:/^\d{4}-\d{2}-\d{2}$/.test(CB.f.fp || "") ? CB.f.fp : "", ct:lecs.filter(l => l.met && l.met !== "ef").map(l => l.ct || "?").join(","), cd:lecs.filter(l => l.met && l.met !== "ef" && !l.ct).map(l => l.dest || "").filter(Boolean).join(" · ").slice(0, 120),
-    lx:lecs.map(l => [l.met, l.mon, l.monto, l.fecha + (l.fechaDe === "imagen" ? "(img)" : ""), l.hora, l.ref].join(" ")).join(" | ").slice(0, 300),
+    lx:(lecs.map(l => [l.met, l.mon, l.monto, l.fecha + (l.fechaDe === "imagen" ? "(img)" : ""), l.hora, l.ref, l.ms ? "⏱" + (l.ms / 1000).toFixed(1) + "s/" + l.pas + "p" : ""].join(" ").trim())
+      .concat(caps.filter(k => k.est === "error").map(k => "ERR " + (k.err || ""))).join(" | ") + (caps.length && OCR.t.baja ? " | lector bajado en " + Math.round(OCR.t.baja / 1000) + "s" : "") + (caps.length && OCR.t.red ? " | lector por red" : "")).slice(0, 300),
     rf:(CB.f.rf || "").trim().slice(0, 120), est:"cola", rec:"", fa:x.n.fac ? x.n.fac[0] : "", cap:caps.length };
   if(S.adm && CB.adNota && CB.adNota[0] === x.n.id && VISTA === "admin") o.ad = 1;
   o.rec = cbSigRec(!!o.ad);
@@ -1414,7 +1483,7 @@ $("vCob").addEventListener("click", async e => {
 $("vCob").addEventListener("change", e => { if(e.target.id === "cbFile" && e.target.files && e.target.files[0]){ const f = e.target.files[0]; e.target.value = ""; cbSubir(f); }
   if(e.target.id === "cbCapF" && e.target.files && e.target.files.length){ const fs = Array.from(e.target.files); e.target.value = ""; cbCapElegida(fs); } });
 $("vCob").addEventListener("input", e => { if(e.target.id === "rcQ"){ CB.rc.q = e.target.value; const L = $("rcL"); if(L) L.innerHTML = rcListaHtml(); return; }
-  if(e.target.id === "cb_fcm"){ CB.facTxt = e.target.value; CB.facErr = ""; const c = $("cbFcn"), x = $("cbFerr"); if(c) c.textContent = CB.facTxt.length + " / 600"; if(x) x.textContent = ""; return; } const k = e.target.dataset && e.target.dataset.cbIn; if(!k) return; CB.f[k] = e.target.value; CB.err = ""; if(k in MT_NOM) CB.on[k] = true;
+  if(e.target.id === "cb_fcm"){ CB.facTxt = e.target.value; CB.facErr = ""; const c = $("cbFcn"), x = $("cbFerr"); if(c) c.textContent = CB.facTxt.length + " / 600"; if(x) x.textContent = ""; return; } const k = e.target.dataset && e.target.dataset.cbIn; if(!k) return; CB.f[k] = e.target.value; CB.err = ""; if(k in MT_NOM) CB.on[k] = true; (CB.man = CB.man || {})[k] = true;
   /* bolívares: Bs ÷ tasa = dólares de la nota. La tasa BCV sigue a la fecha del pago mientras el vendedor no la cambie a mano */
   const n = cbNotas().find(x => x.id === CB.nota);
   if(n && ["bsb", "tb", "ta", "fp"].indexOf(k) >= 0){
