@@ -3,6 +3,8 @@
    el servidor (Apps Script) cuando el dispositivo está aprobado. El primer dispositivo de cada vendedor queda registrado solo;
    cualquier otro espera la aprobación de administración. Generado por herramientas/portal.py: no editar a mano. */
 (function(){
+  /* si este script no llega completo (conexión que se corta), el formulario no recarga la página: avisa (ver onsubmit en portada_cabeza.html) */
+  window.NTX_PORTADA = true;
   const LLAVES = __LLAVES__, CAT = __CAT__, LSC = "ntx-codigo", LSD = "ntx-disp", SRV = "__SRV__";
   const $ = id => document.getElementById(id), b = s => Uint8Array.from(atob(s), x => x.charCodeAt(0));
   const norm = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");

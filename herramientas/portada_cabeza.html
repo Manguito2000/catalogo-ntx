@@ -58,7 +58,7 @@ html,body{background:#0E0E10}
     <h1>Catálogo<br><span>NTX</span></h1>
     <p class="sub">Precios, stock, clientes y pedidos en un solo lugar. Ingresa tu código de vendedor para entrar.</p>
   </div>
-  <form id="accForm" autocomplete="off" novalidate>
+  <form id="accForm" autocomplete="off" novalidate onsubmit="if(!window.NTX_PORTADA){event.preventDefault();var e=document.getElementById('accErr');if(e)e.textContent='La página todavía no termina de cargar. Espera unos segundos; si sigue igual, revisa tu conexión (o cambia de wifi a datos móviles) y vuelve a abrir la app.';}">
     <label for="accCod">Código de vendedor</label>
     <input id="accCod" type="text" inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Escribe tu código" aria-describedby="accErr">
     <button id="accBtn" type="submit">ENTRAR</button>
