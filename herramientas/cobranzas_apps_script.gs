@@ -9,14 +9,19 @@
 //   POST a=cap      el teléfono sube la captura del pago de un cobro (carpeta de Drive "Comprobantes NTX"; enlace en la columna Captura)
 //   Tasa BCV        cada pocas horas (desde la conciliación) se lee la tasa oficial (bcv.org.ve; si falla, ve.dolarapi.com) y se guarda
 //                   por fecha valor en la hoja "Tasas BCV". El portal la usa para pasar los bolívares de una captura a dólares BCV.
-// Solo LEE Holded. Nunca registra pagos ni cambia nada allá.
+// La conciliación de cada hora solo LEE Holded. Lo único que escribe en Holded sale de ADMIN (Mango): registrar un cobro (pagos) y, desde el
+// 23 nov 2026, poner el descuento de contado aceptado en la nota (PUT discount, verificado al releer). Nunca cambia ni borra pagos existentes.
 var COB_COLS = ["Recibo", "Fecha", "Vendedor", "Cliente", "Nota", "Cobrado $", "Abono real $", "Efectivo $", "USDT $", "Zelle $", "Bs (en $)", "Tasa", "Referencia",
   "Estado", "Observación", "Confirmado el", "ts", "tag", "notaId", "uid", "base", "pagos", "dispositivo",
   "Tarifa", "Desc. divisas %", "Abono a la nota $", "Factura",    // columnas nuevas al final (nov 2026): BCV o USD, descuento por pago en divisas, abono en dólares de la nota, factura AdriMan de la nota
   "Mercantil Panamá $", "IVA cobrado $", "Monto Bs", "Tasa BCV", "Fecha del pago", "Cuenta destino", "Destino leído", "Cuenta Holded", "Captura", "Lectura", "Avisos",
   "Confirmado ts", "Cuenta real Holded", "Diferencia", "Aviso del vendedor",
   "Origen", "Registro Holded", "Revisión admin",
-  "Grupo", "Notas del grupo", "Saldo a favor"];
+  "Grupo", "Notas del grupo", "Saldo a favor",
+  "Desc. contado %", "Desc. contado $", "Desc. contado estado", "Días hábiles", "Desc. contado decidido", "Desc. en Holded", "Nota del vendedor"];
+// (23 nov 2026) descuento de contado en notas a crédito en dólares (no BCV): el vendedor lo marca en el cobro; «Desc. contado estado» = automático
+// (pagó dentro de los días hábiles de config.json) | por aprobar | aprobado | rechazado. Se pone en Holded (PUT discount) solo al registrar el cobro
+// desde ADMIN, o con «Poner descuento en Holded» si el pago se registró a mano. «Nota del vendedor» = lo que el vendedor le escribe a administración.
 // (23 nov 2026) un pago para varias notas: el teléfono manda una fila por nota, todas con el mismo «Grupo» (id del pago) y el mismo número de recibo.
 // «Notas del grupo» = "NE4240 + NE4262" (para leerlo en la hoja y en Holded) · «Saldo a favor» = lo que sobró del pago, por forma de pago, solo en la primera fila
 // ({"ze":6.82}); no abona a ninguna nota ni va a Holded: administración decide qué hacer con él.
@@ -27,15 +32,27 @@ var COB_COLS = ["Recibo", "Fecha", "Vendedor", "Cliente", "Nota", "Cobrado $", "
 // y la cuenta de Holded donde debe registrarse cada forma de pago. Las columnas de antes no se mueven.
 var CUENTA_HOLDED = { ef: "CAJA CHICA", us: "USDT", ze: "NUEVO ZELLE", mp: "MERCANTIL PANAMÁ", bs: "Caja para Operaciones en Tránsito", bsFac: "Bolivares Cuenta Juridica" };
 
-/* Descuento BCV (%): un solo número para todo el sistema, en config.json del repositorio del portal. Se lee cada 10 minutos; si no responde, 15. */
-function descuentoBcv() {
-  var cache = CacheService.getScriptCache(), v = Number(cache.get("COB_DBCV"));
-  if (v > 0) return v;
-  try { v = Number(JSON.parse(UrlFetchApp.fetch("https://manguito2000.github.io/catalogo-ntx/config.json", { muteHttpExceptions: true }).getContentText()).descuento_bcv); } catch (e) { v = 0; }
-  if (!(v > 0 && v < 90)) v = 15;
-  try { cache.put("COB_DBCV", String(v), 600); } catch (e) {}
-  return v;
+/* config.json del repositorio del portal (descuento BCV, descuento de contado, días hábiles, feriados). Se lee cada 10 minutos. */
+function cfgPortal() {
+  var cache = CacheService.getScriptCache(), c = cache.get("COB_CFG");
+  if (c) { try { return JSON.parse(c); } catch (e0) {} }
+  var o = null;
+  try { o = JSON.parse(UrlFetchApp.fetch("https://manguito2000.github.io/catalogo-ntx/config.json", { muteHttpExceptions: true }).getContentText()); } catch (e) { o = null; }
+  if (!o || typeof o !== "object") return {};                                              // sin respuesta: valores por defecto, y se reintenta en la próxima llamada
+  try { cache.put("COB_CFG", JSON.stringify(o), 600); } catch (e2) {}
+  return o;
 }
+/* Descuento BCV (%): un solo número para todo el sistema. Si config.json no responde, 15. */
+function descuentoBcv() { var v = Number(cfgPortal().descuento_bcv); return v > 0 && v < 90 ? v : 15; }
+/* Descuento de contado: % normal, días hábiles para que se aplique solo, y feriados */
+function contadoCfg() {
+  var o = cfgPortal(), d = Number(o.descuento_contado), l = Number(o.contado_dias_habiles);
+  return { pct: d > 0 && d < 50 ? d : 15, limite: l >= 0 && l < 30 ? l : 4, feriados: Array.isArray(o.feriados) ? o.feriados.map(String) : [] };
+}
+/* día de calendario de una fecha de Holded (segundos a medianoche de España) */
+function diaHolded(sec) { return Utilities.formatDate(new Date(((Number(sec) || 0) + 7200) * 1000), "UTC", "yyyy-MM-dd"); }
+/* total de la nota sin descuento (sobre eso se calcula el descuento de contado) */
+function baseNota(nota) { var t = Number(nota.subtotal); if (!(t > 0)) { t = Number(nota.total) || 0; var d = Number(nota.discount) || 0; if (d > 0 && d < 100) t = t / (1 - d / 100); } return Math.round(t * 100) / 100; }
 var COB = {}; COB_COLS.forEach(function (c, i) { COB[c] = i; });
 
 // Rutas de cobranzas y facturas. En el receptor, doGet las enruta con: if (esCobranzas(q.a)) return json(cobranzas(q));
@@ -111,7 +128,29 @@ function cobroNuevo(tag, q) {
     var pendN = tb ? (dn > 0 ? pend / (1 - dn / 100) : pend) : pend;
     var mios = filas.filter(function (f) { return f.notaId === nid && (f.estado === "cobrado" || f.estado === "revisar"); })
       .reduce(function (s, f) { return s + (f.bv || (f.tarifa === "BCV" ? f.abono / F : f.abono)); }, 0);
-    if (bv > pendN - mios + 0.5) return { estado: "error", msg: "El abono ($" + bv.toFixed(2) + (tb ? " BCV" : "") + ") es mayor que lo que falta de la nota ($" + Math.max(0, pendN - mios).toFixed(2) + (tb ? " BCV" : "") + ")" };
+    // Descuento de contado (23 nov 2026): solo notas en dólares (no BCV), sin descuento en Holded, sin factura y no en un pago para varias notas.
+    // Vendedor: se aplica solo si pagó dentro de los días hábiles de config.json; si no, queda por aprobar. Administración: aprobado de una vez.
+    var dc = Math.round((Number(c.dc) || 0) * 100) / 100, dcm = 0, dce = "", dhab = "", numN = String(nota.docNumber || "");
+    if (dc > 0) {
+      if (tb) return { estado: "error", msg: "Las notas BCV no llevan descuento de contado: si paga en divisas se usa el descuento por pago en divisas" };
+      if (gr) return { estado: "error", msg: "El descuento de contado no está disponible en un pago para varias notas: regístralo nota por nota" };
+      if (fac0) return { estado: "error", msg: "La nota " + numN + " tiene factura: no lleva descuento de contado" };
+      if (dn > 0) return { estado: "error", msg: "La nota " + numN + " ya tiene " + dn + " % de descuento en Holded" };
+      if (dc > 50) return { estado: "error", msg: "El descuento no puede pasar del 50 %" };
+      var otroDc = filas.filter(function (f) { return f.notaId === nid && f.estado !== "anulado" && f.dc > 0 && f.dce !== "rechazado"; })[0];
+      if (otroDc) return { estado: "error", msg: "La nota " + numN + " ya tiene el descuento de contado pedido en el recibo " + otroDc.recibo };
+      dcm = Math.round(baseNota(nota) * dc) / 100;
+      if (adm) dce = "aprobado";
+      else {
+        var CC = contadoCfg(), dec = contadoDecide({ nota: diaHolded(nota.date), pago: c.fp, hoy: Utilities.formatDate(new Date(), "America/Caracas", "yyyy-MM-dd"), limite: CC.limite, feriados: CC.feriados });
+        dhab = dec.dh; dce = dec.auto ? "automático" : "por aprobar";
+      }
+    }
+    // descuentos de contado ya aceptados en otros cobros de esta nota que Holded todavía no tiene: lo que falta de la nota es menos
+    var descOtros = dn > 0 ? 0 : filas.filter(function (f) { return f.notaId === nid && f.estado !== "anulado" && f.dc > 0 && (f.dce === "automático" || f.dce === "aprobado"); })
+      .reduce(function (s, f) { return s + f.dcm; }, 0);
+    var falta = pendN - dcm - descOtros - mios;
+    if (bv > falta + 0.5) return { estado: "error", msg: "El abono ($" + bv.toFixed(2) + (tb ? " BCV" : "") + ") es mayor que lo que falta de la nota ($" + Math.max(0, falta).toFixed(2) + (tb ? " BCV" : "") + (dcm ? ", ya con el descuento de " + dc + " %" : "") + ")" };
     var props = PropertiesService.getScriptProperties(), n = Number(props.getProperty(ckey) || 0) + 1, ahora = new Date();
     var pre = adm ? "A" : prefijoRecibo(tag), rec = pre + "-" + ("000" + n).slice(-4);
     // El teléfono propone el número (así entrega el recibo en el momento, incluso sin conexión). Se respeta si es de este vendedor y nadie lo usó.
@@ -142,6 +181,12 @@ function cobroNuevo(tag, q) {
     pon("Mercantil Panamá $", mp || ""); pon("IVA cobrado $", iv || ""); pon("Monto Bs", num(c.bsb) || ""); pon("Tasa BCV", Number(c.tbc) > 0 ? Number(c.tbc) : "");
     pon("Fecha del pago", fp ? "'" + fp : ""); pon("Cuenta destino", cts.map(function (x) { return x === "?" ? "no reconocida" : x; }).join(", ")); pon("Destino leído", cd); pon("Lectura", tx(c.lx, 300));
     pon("Cuenta Holded", cuentaHolded(ef, us, ze, mp, bs - iv, !!fac0));
+    pon("Nota del vendedor", tx(c.nv, 300).trim());
+    if (dc > 0) {
+      pon("Desc. contado %", dc); pon("Desc. contado $", dcm); pon("Desc. contado estado", dce); pon("Días hábiles", dhab === "" ? "" : dhab);
+      if (dce !== "por aprobar") pon("Desc. contado decidido", fecha(ahora.toISOString()) + (adm ? " · administración" : " · automático"));
+      if (bv < falta - 0.5) avisos.push("Pago parcial con descuento de contado: con el " + dc + " % aún quedan $" + (falta - bv).toFixed(2));
+    }
     if (cts.indexOf("?") >= 0) avisos.push("La captura no muestra una cuenta de la empresa" + (cd ? " (" + cd + ")" : ""));
     var refsDe = function (t) { return String(t || "").split("·").map(refNorm).filter(function (x) { return x.length >= 6; }); }, mias = refsDe(c.rf);
     var gn = gr ? tx(c.gn, 200) : "", sf = gr && !hermanos.length ? sfLee(c.sf) : {};          // lo que sobró del pago va solo en la primera fila del grupo
@@ -217,7 +262,8 @@ function cobroAvisar(tag, q) {
 function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, mp: f.mp, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos, dd: f.dd, bv: f.bv || (f.bv === 0 && f.iv ? 0 : null), tb: f.tarifa === "BCV" ? "b" : "", fa: f.fa || "",
   iv: f.iv, bsb: f.bsb, tbc: f.tbc, fp: f.fp, ct: f.ct, cap: capLinks(f.cap).length, av: f.av,
   tsc: f.tsc || 0, ch: f.ch, cr: f.cr, dif: f.rva ? "" : f.dif, avv: f.avv, ad: f.org === "admin" ? 1 : 0,
-  gr: f.gr || "", gn: f.gn || "", sf: f.sf || {} }; }   // pago para varias notas: grupo, sus notas y lo que sobró (solo en la primera fila)   // diferencia que administración dejó como está: ya no se marca
+  gr: f.gr || "", gn: f.gn || "", sf: f.sf || {},
+  dc: f.dc || 0, dcm: f.dcm || 0, dce: f.dc ? f.dce : "", dh: f.dh === "" ? null : Number(f.dh), dcd: f.dcd || "", dch: f.dch || "", nv: f.nv || "" }; }   // descuento de contado y nota del vendedor (23 nov 2026)   // pago para varias notas: grupo, sus notas y lo que sobró (solo en la primera fila)   // diferencia que administración dejó como está: ya no se marca
 /* fecha aaaa-mm-dd de una celda (texto o fecha de la hoja) */
 function ymd(v) { if (v instanceof Date) return Utilities.formatDate(v, "America/Caracas", "yyyy-MM-dd"); var s = String(v || "").replace(/^'/, ""); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ""; }
 
@@ -381,7 +427,9 @@ function leerCobros(hoja) {
       tsc: N(r[COB["Confirmado ts"]]), cr: String(r[COB["Cuenta real Holded"]] || ""), dif: String(r[COB["Diferencia"]] || ""),
       avv: String(r[COB["Aviso del vendedor"]] || "").split(" |")[0], avvTs: N(String(r[COB["Aviso del vendedor"]] || "").split(" |")[1]),
       org: String(r[COB["Origen"]] || ""), reg: J(r[COB["Registro Holded"]]), rva: String(r[COB["Revisión admin"]] || ""),
-      gr: String(r[COB["Grupo"]] || ""), gn: String(r[COB["Notas del grupo"]] || ""), sf: sfLee(r[COB["Saldo a favor"]]) });
+      gr: String(r[COB["Grupo"]] || ""), gn: String(r[COB["Notas del grupo"]] || ""), sf: sfLee(r[COB["Saldo a favor"]]),
+      dc: N(r[COB["Desc. contado %"]]), dcm: N(r[COB["Desc. contado $"]]), dce: String(r[COB["Desc. contado estado"]] || "").trim().toLowerCase(), dh: String(r[COB["Días hábiles"]] === "" ? "" : r[COB["Días hábiles"]]),
+      dcd: String(r[COB["Desc. contado decidido"]] || ""), dch: String(r[COB["Desc. en Holded"]] || ""), nv: String(r[COB["Nota del vendedor"]] || "") });
   }
   return out;
 }
@@ -489,6 +537,53 @@ function saldoVisible(saldoReal, cobros) {
   return { porConfirmar: Math.round(p * 100) / 100, saldo: Math.max(0, Math.round((saldoReal - p) * 100) / 100) };
 }
 if (typeof module !== "undefined") module.exports = { conciliar: conciliar, saldoVisible: saldoVisible };
+
+/* ---------- contado: copia exacta de herramientas/contado.js (probada aparte con contado_pruebas.js; si se cambia uno, cambiar el otro) ---------- */
+/* Descuento de contado en notas a crédito (23 nov 2026, regla de Mango). Función pura: sirve igual en el receptor (Apps Script) y en la página.
+   Si el cliente paga dentro de los primeros N días hábiles de la nota (config.json → contado_dias_habiles, hoy 4), el descuento
+   (config.json → descuento_contado, hoy 15 %) se aplica solo y administración recibe el aviso. Si paga después, queda por aprobar.
+
+   Cómo se cuentan los días hábiles: el día en que se hizo la nota NO cuenta; se cuentan de lunes a viernes, sin feriados
+   (config.json → feriados), hasta el día del pago inclusive. Nota del lunes pagada el viernes = 4 días hábiles → automático.
+   Día del pago = la fecha del pago (la de la captura o la que se escribió); si falta, hoy. Nunca después de hoy ni antes de la nota.
+
+   Fechas siempre como texto aaaa-mm-dd (día de calendario en Venezuela). */
+function chDia(s) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "")); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN; }
+function chTxt(t) { var d = new Date(t); return d.getUTCFullYear() + "-" + ("0" + (d.getUTCMonth() + 1)).slice(-2) + "-" + ("0" + d.getUTCDate()).slice(-2); }
+/* días hábiles DESPUÉS de "desde" y hasta "hasta" inclusive (0 si es el mismo día o antes) */
+function diasHabiles(desde, hasta, feriados) {
+  var a = chDia(desde), b = chDia(hasta), fer = {}, n = 0;
+  if (isNaN(a) || isNaN(b)) return NaN;
+  (feriados || []).forEach(function (f) { fer[String(f)] = 1; });
+  for (var t = a + 86400000; t <= b && n < 400; t += 86400000) {
+    var w = new Date(t).getUTCDay();
+    if (w !== 0 && w !== 6 && !fer[chTxt(t)]) n++;
+  }
+  return n;
+}
+/* ¿El descuento de contado se aplica solo?
+   o = { nota: "aaaa-mm-dd", pago: "aaaa-mm-dd" | "", hoy: "aaaa-mm-dd", limite: 4, feriados: [...] }
+   → { dh: días hábiles hasta el pago, pago: día usado, auto: true | false } */
+function contadoDecide(o) {
+  var hoy = o.hoy, pago = /^\d{4}-\d{2}-\d{2}$/.test(String(o.pago || "")) ? String(o.pago) : hoy;
+  if (chDia(pago) > chDia(hoy)) pago = hoy;
+  if (chDia(pago) < chDia(o.nota)) pago = o.nota;
+  var lim = Number(o.limite) >= 0 ? Number(o.limite) : 4, dh = diasHabiles(o.nota, pago, o.feriados);
+  return { dh: dh, pago: pago, auto: !isNaN(dh) && dh <= lim };
+}
+/* Monto del descuento: sobre el total de la nota SIN descuento (Holded aplica el descuento a toda la nota). */
+function contadoMonto(baseNota, pct) { return Math.round((Number(baseNota) || 0) * (Number(pct) || 0)) / 100; }
+/* Descuento que hace cuadrar lo recibido (para administración): el % con que la nota queda saldada con lo que ya entró y lo que se va a registrar.
+   pendiente = lo que Holded dice que falta HOY (sin descuento), recibido = lo que se va a registrar (y los demás cobros sin registrar), base = total sin descuento.
+   → % con dos decimales (0 si no hace falta descuento; null si haría falta más del 50 %). */
+function contadoCuadre(pendiente, recibido, base) {
+  var falta = Math.round(((Number(pendiente) || 0) - (Number(recibido) || 0)) * 100) / 100;
+  if (falta <= 0.009) return 0;
+  if (!(base > 0)) return null;
+  var p = Math.round(falta / base * 10000) / 100;
+  return p > 50 ? null : p;
+}
+
 
 /* =====================================================================================================================
    FACTURAS AdriMan desde el portal (nov 2026)
@@ -758,7 +853,7 @@ function adCobros(q) {
       if (!f) return { estado: "error", msg: "No encontré ese cobro" };
       return { estado: "ok", reg: registrarFila(hoja, filas, f), cobro: adFila(f, null) };
     }
-    if (q.a === "adrev") return adRevisar(hoja, filas, f, String(q.e || ""));
+    if (q.a === "adrev") return adRevisar(hoja, filas, f, String(q.e || ""), q);
     return adVista(hoja, filas, notas, tags);
   } finally { lock.releaseLock(); }
 }
@@ -841,6 +936,18 @@ function registrarFila(hoja, filas, f) {
   if (f.estado === "confirmado") return { ya: true, msg: "Holded ya tenía este pago" + (f.cr ? " (" + f.cr + ")" : "") + ": quedó confirmado sin registrar nada." };
   var otro = filas.filter(function (x) { return x.notaId === f.notaId && x.uid !== f.uid && antes[x.uid] !== "confirmado" && x.estado === "confirmado"; })[0];
   if (otro) return { alto: true, msg: "Holded ya tenía un pago nuevo en la nota " + f.nota + " y se asignó al recibo " + otro.recibo + ". Revisa la nota en Holded antes de registrar " + f.recibo + "." };
+  // 1b) descuento de contado: se decide antes de registrar; si está aceptado y Holded aún no lo tiene, se pone en la nota (PUT) y se verifica
+  var dcPuesto = false;
+  if (f.dc > 0 && f.dce !== "rechazado") {
+    if (f.dce === "por aprobar") return { alto: true, dcp: true, msg: "El descuento de contado de " + f.dc + " % de " + f.recibo + " está por aprobar (pagó al día hábil " + f.dh + "). Apruébalo o recházalo antes de registrar." };
+    var dnH = Number(nota.discount) || 0;
+    if (dnH > 0 && Math.abs(dnH - f.dc) > 0.009) return { alto: true, msg: "La nota " + f.nota + " ya tiene " + dnH + " % de descuento en Holded y el recibo " + f.recibo + " pide " + f.dc + " %. Revísala en Holded." };
+    if (!(dnH > 0)) {
+      var pd = descuentoEnHolded(f.notaId, f.dc, nota);
+      if (pd.alto) return pd;
+      nota = pd.nota; escribir(hoja, f.fila, { "Desc. en Holded": fecha(new Date().toISOString()) }); f.dch = "si"; dcPuesto = true;
+    } else if (!f.dch) { escribir(hoja, f.fila, { "Desc. en Holded": "ya estaba" }); f.dch = "ya estaba"; }
+  }
   // 2) pagos nuevos en Holded que no explica ni este cobro (un intento anterior a medias): mejor no registrar encima
   var fac = fcDeTags(nota.tags) || (f.fa ? [f.fa] : null), partes = partesHolded(f, !!fac), hechas = (f.reg || []).slice(), usados = {}, base = {};
   filas.forEach(function (x) { if (x.estado === "confirmado") (x.pagos || []).forEach(function (p) { usados[p[0]] = 1; }); });
@@ -873,19 +980,44 @@ function registrarFila(hoja, filas, f) {
   var out = { ok: true, msg: partes.map(function (x) { return "$" + x.m.toFixed(2).replace(".", ",") + " en " + x.cta; }).join(" + "), pend: Number(nota2.paymentsPending) || 0 }, av = [];
   if (!mios.completo) av.push("Holded aceptó el pago pero no lo encontré al releer la nota " + f.nota + ". Revísala en Holded.");
   if (f.tarifa === "BCV" && !(Number(nota2.discount) > 0) && out.pend >= 0.01) av.push("La nota " + f.nota + " aún no tiene el " + descuentoBcv() + " % en Holded: le quedan $" + out.pend.toFixed(2) + " pendientes hasta que le pongas el descuento.");
+  if (dcPuesto) out.msg = "Descuento de " + f.dc + " % puesto en la nota · " + out.msg;
   if (av.length) out.aviso = av.join(" ");
   return out;
+}
+/* Pone el descuento de contado (%) en una nota de Holded que no tiene descuento, y verifica que no cambió nada más.
+   PUT documents/invoice/<id> con { discount, tags } (así se probó en NE4244: un PUT sin discount lo pone en 0; las etiquetas se mandan iguales).
+   Devuelve { nota } (la nota releída) o { alto, msg } si algo no cuadra (no se registra el pago). */
+function descuentoEnHolded(nid, pct, nota) {
+  nota = nota || holded("documents/invoice/" + nid);
+  var num = String(nota.docNumber || ""), antes = Number(nota.discount) || 0;
+  if (Math.abs(antes - pct) < 0.01) return { nota: nota };
+  if (antes > 0) return { alto: true, msg: "La nota " + num + " ya tiene " + antes + " % de descuento en Holded." };
+  var base = baseNota(nota), lineas = (nota.products || []).length, tags = (nota.tags || []).slice();
+  var r = cobHttp("put", "documents/invoice/" + nid, { discount: pct, tags: tags });
+  if (!((r.codigo === 200 || r.codigo === 201) && !(r.datos && r.datos.status === 0)))
+    return { alto: true, msg: "Holded no aceptó el descuento de " + pct + " % en la nota " + num + (r.datos && r.datos.info ? " (" + r.datos.info + ")" : " (respuesta " + r.codigo + ")") + ". No se registró nada." };
+  try { var cache = CacheService.getScriptCache(); cache.remove("COB_TODAS"); cache.remove("COB_NT"); } catch (e) {}
+  var n2 = holded("documents/invoice/" + nid), mal = [];
+  if (Math.abs((Number(n2.discount) || 0) - pct) > 0.009) mal.push("el descuento quedó en " + (Number(n2.discount) || 0) + " %");
+  if ((n2.products || []).length !== lineas) mal.push("cambió el número de líneas");
+  if (Math.abs(Number(n2.total) - Math.round(base * (100 - pct)) / 100) > 0.05) mal.push("el total quedó en $" + Number(n2.total).toFixed(2) + " (se esperaba $" + (Math.round(base * (100 - pct)) / 100).toFixed(2) + ")");
+  if (String(n2.contact) !== String(nota.contact)) mal.push("cambió el cliente");
+  var t2 = (n2.tags || []).slice().sort().join(","), t1 = tags.slice().sort().join(",");
+  if (t2 !== t1) mal.push("cambiaron las etiquetas (" + (t1 || "ninguna") + " → " + (t2 || "ninguna") + ")");
+  if (mal.length) { aviso("revisar descuento en " + num, "Al poner el " + pct + " % en la nota " + num + " en Holded: " + mal.join("; ") + ". No se registró el pago. Revisa la nota en Holded."); return { alto: true, msg: "Al poner el " + pct + " % en la nota " + num + ": " + mal.join("; ") + ". No se registró el pago: revisa la nota en Holded." }; }
+  return { nota: n2 };
 }
 /* un cobro tal como lo ve administración */
 function adFila(f, n) {
   var v = vista(f), fac = (n && n.fac) || (f.fa ? [f.fa] : null);
   v.ven = f.vendedor; v.org = f.org; v.reg = f.reg || []; v.rva = f.rva; v.partes = partesHolded(f, !!fac); v.fh = fechaHolded(f); v.fa = fac ? fac[0] : "";
-  if (n) { v.npen = n.pen; v.nd = n.d; }
+  if (n) { v.npen = n.pen; v.nd = n.d; v.nbase = n.d > 0 && n.d < 100 ? adRd(n.tot / (1 - n.d / 100)) : n.tot; v.nfe = diaHolded(n.f); }   // base sin descuento y día de la nota (descuento de contado)
   return v;
 }
-function adRevisar(hoja, filas, f, e) {
+function adRevisar(hoja, filas, f, e, q) {
   if (!f) return { estado: "error", msg: "No encontré ese cobro" };
   var hoy = fecha(new Date().toISOString()), ahora = Math.floor(Date.now() / 1000);
+  if (/^dc/.test(e)) return adDescuento(hoja, filas, f, e, q || {}, hoy);
   if (e === "revisar") {                                                                 // «Ya lo corregí»: se vuelve a leer la cuenta en Holded
     var cu = cuentasReales(f, holded("documents/invoice/" + f.notaId));
     escribir(hoja, f.fila, { "Cuenta real Holded": cu.txt || "sin pago en Holded", "Diferencia": cu.dif }); f.cr = cu.txt || "sin pago en Holded"; f.dif = cu.dif;
@@ -902,6 +1034,45 @@ function adRevisar(hoja, filas, f, e) {
     escribir(hoja, f.fila, { "Estado": "anulado", "Observación": "Anulado por administración el " + hoy }); f.estado = "anulado"; return { estado: "ok", cobro: adFila(f, null) };
   }
   return { estado: "error", msg: "Acción no válida" };
+}
+/* Descuento de contado desde ADMIN:
+   dcaprobar[&p=%]  aprueba el que pidió el vendedor (se puede cambiar el %) · dcrechazar  lo rechaza (la nota sigue debiendo la diferencia)
+   dcpon&p=%        administración pone, cambia o quita (p=0) el descuento de un cobro por registrar, p. ej. para que cuadre con lo recibido
+   dcholded         pone en Holded el descuento ya aceptado de un cobro confirmado (cuando el pago se registró a mano en Holded) */
+function adDescuento(hoja, filas, f, e, q, hoy) {
+  var vivo = f.estado === "cobrado" || f.estado === "revisar";
+  if (e === "dcholded") {
+    if (!(f.dc > 0) || !(f.dce === "automático" || f.dce === "aprobado")) return { estado: "error", msg: "Este cobro no tiene un descuento aceptado" };
+    var pd = descuentoEnHolded(f.notaId, f.dc, null);
+    if (pd.alto) return { estado: "error", msg: pd.msg };
+    escribir(hoja, f.fila, { "Desc. en Holded": hoy }); f.dch = hoy;
+    return { estado: "ok", msg: "Descuento de " + f.dc + " % puesto en la nota " + f.nota + ". Pendiente en Holded: $" + (Number(pd.nota.paymentsPending) || 0).toFixed(2), cobro: adFila(f, null) };
+  }
+  if (f.estado === "anulado") return { estado: "error", msg: "Ese cobro está anulado" };
+  if (!vivo && e === "dcpon") return { estado: "error", msg: "Ese cobro ya está " + f.estado + ": aquí solo se aprueba o rechaza el descuento que pidió el vendedor" };
+  if (f.tarifa === "BCV") return { estado: "error", msg: "Las notas BCV no llevan descuento de contado" };
+  if (f.gr) return { estado: "error", msg: "El descuento de contado no está disponible en un pago para varias notas" };
+  if (f.dch) return { estado: "error", msg: "El descuento de este cobro ya está puesto en Holded" };
+  if (e === "dcrechazar") {
+    if (!(f.dc > 0)) return { estado: "error", msg: "Este cobro no tiene descuento" };
+    escribir(hoja, f.fila, { "Desc. contado estado": "rechazado", "Desc. contado decidido": hoy + " · administración" }); f.dce = "rechazado"; f.dcd = hoy + " · administración";
+    return { estado: "ok", cobro: adFila(f, null) };
+  }
+  if (e !== "dcaprobar" && e !== "dcpon") return { estado: "error", msg: "Acción no válida" };
+  var p = q.p == null || q.p === "" ? (e === "dcaprobar" ? f.dc : NaN) : Math.round(Number(String(q.p).replace(",", ".")) * 100) / 100;
+  if (!(p >= 0 && p <= 50)) return { estado: "error", msg: "El descuento debe estar entre 0 y 50 %" };
+  if (e === "dcaprobar" && !(f.dc > 0)) return { estado: "error", msg: "Este cobro no tiene descuento por aprobar" };
+  var nota = holded("documents/invoice/" + f.notaId), dn = Number(nota.discount) || 0;
+  if (dn > 0) return { estado: "error", msg: "La nota " + f.nota + " ya tiene " + dn + " % de descuento en Holded" };
+  if (fcDeTags(nota.tags)) return { estado: "error", msg: "La nota " + f.nota + " tiene factura: no lleva descuento de contado" };
+  if (p > 0) {
+    var otro = filas.filter(function (x) { return x.notaId === f.notaId && x.uid !== f.uid && x.estado !== "anulado" && x.dc > 0 && x.dce !== "rechazado"; })[0];
+    if (otro) return { estado: "error", msg: "La nota " + f.nota + " ya tiene el descuento en el recibo " + otro.recibo };
+  }
+  var dcm = Math.round(baseNota(nota) * p) / 100, est = p > 0 ? "aprobado" : "";
+  escribir(hoja, f.fila, { "Desc. contado %": p || "", "Desc. contado $": p ? dcm : "", "Desc. contado estado": est, "Desc. contado decidido": hoy + " · administración" });
+  f.dc = p; f.dcm = p ? dcm : 0; f.dce = est; f.dcd = hoy + " · administración";
+  return { estado: "ok", cobro: adFila(f, null), pen: Number(nota.paymentsPending) || 0, base: baseNota(nota) };
 }
 /* ---- carpeta física: pagos de Holded que Mango aún no anota en la copia en papel de la nota. No vencen: salen solo cuando los marca. ---- */
 function carHoja() { return fcHoja("Carpeta", CAR_COLS); }
@@ -951,8 +1122,14 @@ function adVista(hoja, filas, notas, tags) {
   var ids = {}; filas.forEach(function (f) { if (f.estado === "cobrado" || f.estado === "revisar") ids[f.notaId] = 1; });
   Object.keys(ids).forEach(function (nid) { if (porId[nid]) conciliarNota(hoja, filas, nid, { paymentsPending: porId[nid].pen, paymentsDetail: porId[nid].pg.map(function (p) { return { id: p[0], amount: p[1], date: p[2], bankId: p[3] }; }) }, ahora); });
   // 2) cobros que piden atención: por registrar y con diferencia
-  var cob = filas.filter(function (f) { return f.estado === "cobrado" || f.estado === "revisar" || (f.estado === "confirmado" && f.dif && !f.rva && f.ts >= ahora - 95 * 86400); })
-    .map(function (f) { return adFila(f, porId[f.notaId]); });
+  // descuento de contado aceptado de un cobro ya confirmado (pago registrado a mano en Holded): si Holded ya lo tiene se anota; si no, va a «Con diferencia»
+  var dcFalta = function (f) {
+    if (f.estado !== "confirmado" || !(f.dc > 0) || !(f.dce === "automático" || f.dce === "aprobado" || f.dce === "por aprobar") || f.dch || !porId[f.notaId] || f.ts < ahora - 95 * 86400) return false;
+    if (porId[f.notaId].d > 0) { var v0 = { "Desc. en Holded": "ya estaba" }; if (f.dce === "por aprobar") { v0["Desc. contado estado"] = "aprobado"; f.dce = "aprobado"; } escribir(hoja, f.fila, v0); f.dch = "ya estaba"; return false; }   // administración lo puso a mano en Holded
+    return true;
+  };
+  var cob = filas.filter(function (f) { return f.estado === "cobrado" || f.estado === "revisar" || (f.estado === "confirmado" && f.dif && !f.rva && f.ts >= ahora - 95 * 86400) || dcFalta(f); })
+    .map(function (f) { var v = adFila(f, porId[f.notaId]); if (f.estado === "confirmado" && f.dc > 0 && !f.dch && f.dce !== "rechazado") v.dcf = f.dce === "por aprobar" ? 2 : 1; return v; });   // dcf 1 = falta ponerlo en Holded · 2 = falta decidirlo
   // 3) pagos de Holded en cuentas archivadas o desconocidas (90 días) que ningún cobro reclama
   var recl = {}; filas.forEach(function (f) { (f.pagos || []).forEach(function (p) { recl[p[0]] = 1; }); });
   var arch = [];
