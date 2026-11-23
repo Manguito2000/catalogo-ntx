@@ -899,6 +899,10 @@ function partesHolded(f, fac) {
   return p;
 }
 function fechaHolded(f) { return f.fp || Utilities.formatDate(new Date(f.ts * 1000), "America/Caracas", "yyyy-MM-dd"); }
+/* Fecha con que cada parte queda en Holded (y en «Por anotar en carpeta»): lo que entra por captura (Zelle, USDT, Bs…) lleva la fecha del pago;
+   el EFECTIVO lleva el día en que administración lo recibe y lo registra (hoy), no el día en que el vendedor lo cobró. */
+function diaHoy() { return Utilities.formatDate(new Date(), "America/Caracas", "yyyy-MM-dd"); }
+function fechaParte(f, k) { return k === "ef" ? diaHoy() : fechaHolded(f); }
 /* aaaa-mm-dd → medianoche de España (así guarda Holded la fecha de los pagos que se anotan a mano) */
 function tsHolded(s) {
   var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "")); if (!m) return Math.floor(Date.now() / 1000);
@@ -959,9 +963,9 @@ function registrarFila(hoja, filas, f) {
   var faltan = partes.filter(function (p) { return hechas.indexOf(p.k) < 0; }), porPagar = adRd(faltan.reduce(function (s, p) { return s + p.m; }, 0)), pend = Number(nota.paymentsPending) || 0;
   if (!partes.length) throw new Error("Este cobro no tiene montos para registrar en Holded.");
   if (porPagar > pend + 0.5) return { alto: true, msg: "En Holded la nota " + f.nota + " solo tiene $" + pend.toFixed(2) + " pendientes y este cobro registra $" + porPagar.toFixed(2) + ". Revisa la nota en Holded." };
-  var fh = tsHolded(fechaHolded(f)), desc = ("Recibo " + f.recibo + " · " + f.vendedor + (f.gn ? " · " + f.gn : "") + (f.ref ? " · ref. " + f.ref : "")).slice(0, 140);   // pago para varias notas: la misma referencia en cada nota
+  var desc = ("Recibo " + f.recibo + " · " + f.vendedor + (f.gn ? " · " + f.gn : "") + (f.ref ? " · ref. " + f.ref : "")).slice(0, 140);   // pago para varias notas: la misma referencia en cada nota
   for (var i = 0; i < faltan.length; i++) {
-    var p = faltan[i], r = cobHttp("post", "documents/invoice/" + f.notaId + "/pay", { date: fh, amount: p.m, treasury: CUENTA_ID[p.cta], desc: desc });
+    var p = faltan[i], r = cobHttp("post", "documents/invoice/" + f.notaId + "/pay", { date: tsHolded(fechaParte(f, p.k)), amount: p.m, treasury: CUENTA_ID[p.cta], desc: desc });
     if (!((r.codigo === 200 || r.codigo === 201) && !(r.datos && r.datos.status === 0))) {
       escribir(hoja, f.fila, { "Registro Holded": JSON.stringify(hechas) }); f.reg = hechas;
       throw new Error("Holded no aceptó $" + p.m.toFixed(2) + " en " + p.cta + (r.datos && r.datos.info ? " (" + r.datos.info + ")" : " (respuesta " + r.codigo + ")") + "." +
@@ -1010,7 +1014,7 @@ function descuentoEnHolded(nid, pct, nota) {
 /* un cobro tal como lo ve administración */
 function adFila(f, n) {
   var v = vista(f), fac = (n && n.fac) || (f.fa ? [f.fa] : null);
-  v.ven = f.vendedor; v.org = f.org; v.reg = f.reg || []; v.rva = f.rva; v.partes = partesHolded(f, !!fac); v.fh = fechaHolded(f); v.fa = fac ? fac[0] : "";
+  v.ven = f.vendedor; v.org = f.org; v.reg = f.reg || []; v.rva = f.rva; v.partes = partesHolded(f, !!fac); v.fh = (v.partes.length && v.partes.every(function (x) { return x.k === "ef"; })) ? diaHoy() : fechaHolded(f); v.fhe = v.partes.some(function (x) { return x.k === "ef"; }) ? diaHoy() : ""; v.fa = fac ? fac[0] : "";
   if (n) { v.npen = n.pen; v.nd = n.d; v.nbase = n.d > 0 && n.d < 100 ? adRd(n.tot / (1 - n.d / 100)) : n.tot; v.nfe = diaHolded(n.f); }   // base sin descuento y día de la nota (descuento de contado)
   return v;
 }
@@ -1090,8 +1094,10 @@ function carpetaLista(notas, filas, tags, ctas, ahora) {
   notas.forEach(function (n) {
     n.pg.forEach(function (p) {
       var e = est[p[0]]; if (e && (e.e === "anotado" || e.e === "base")) return;
-      var f = rec[p[0]], c = ctas[p[3]] || ["", 0], tag = tags[n.c] || "";
-      out.push({ p: p[0], n: n.id, nn: n.num, cn: n.cn, ven: carNombre(tag), m: p[1], f: p[2], cta: c[0], arch: c[1] ? 1 : 0,
+      var f = rec[p[0]], c = ctas[p[3]] || ["", 0], tag = tags[n.c] || "", fd = p[2];
+      // fecha que se anota en el papel = la del cobro: la de la captura (fp) o, si fue efectivo, el día en que administración lo recibió (al registrarlo desde la app)
+      if (f) { if (c[0] === CUENTA_HOLDED.ef) { if ((f.reg || []).length && f.tsc) fd = tsHolded(Utilities.formatDate(new Date(f.tsc * 1000), "America/Caracas", "yyyy-MM-dd")); } else if (f.fp) fd = tsHolded(f.fp); }
+      out.push({ p: p[0], n: n.id, nn: n.num, cn: n.cn, ven: carNombre(tag), m: p[1], f: fd, cta: c[0], arch: c[1] ? 1 : 0,
         rec: f ? f.recibo : "", ad: f && f.org === "admin" ? 1 : 0, tb: f ? (f.tarifa === "BCV" ? "b" : "u") : "",
         rbv: f && f.tarifa === "BCV" && f.abono > 0 && f.bv > 0 ? Math.round(f.bv / f.abono * 10000) / 10000 : 0, pen: n.pen, d: n.d });
     });

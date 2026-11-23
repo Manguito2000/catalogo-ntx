@@ -120,4 +120,17 @@ const V = { cod: "GAB", d: "dispositivo123456" };
   const r = W.ctx.cobranzas({ a: "cobro", k: "ADM", ...V, x: x({ id: "uid-00000008", n: N1, ef: 850, ab: 850, dc: 15 }) });
   eq("8 aprobado", r.cobro.dce, "aprobado"); si("8 registrado", r.reg && r.reg.ok); eq("8 saldada", W.H.notas[N1].paymentsPending, 0); }
 
+
+// 9) Fechas: el efectivo lleva el día en que administración lo recibe (hoy); lo de la captura lleva su fecha. «Por anotar en carpeta» muestra esas mismas.
+{ const W = mundo(); const fz = menosHabiles(3), fe = menosHabiles(5);
+  W.H.notas[N1] = nota(N1, "NE5001", menosHabiles(6), 400); W.H.notas[N2] = nota(N2, "NE5002", menosHabiles(6), 500);
+  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000091", n: N1, ze: 400, ab: 400, fp: fz }) });
+  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000092", n: N2, ef: 500, ab: 500, fp: fe }) });
+  const v0 = W.ctx.cobranzas({ a: "adcob", k: "ADM" }), c92 = v0.cob.find(c => c.id === "uid-00000092");
+  eq("9 efectivo: la tarjeta dice hoy", c92.fh, hoyCcs); eq("9 zelle: la tarjeta dice la fecha de la captura", v0.cob.find(c => c.id === "uid-00000091").fh, fz);
+  W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000091" }); W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000092" });
+  eq("9 pago Zelle en Holded", W.H.pays.find(p => p.amount === 400).date, sec(fz)); eq("9 pago efectivo en Holded", W.H.pays.find(p => p.amount === 500).date, sec(hoyCcs));
+  const car = W.ctx.cobranzas({ a: "adcob", k: "ADM" }).car;
+  eq("9 carpeta Zelle", car.find(p => p.nn === "NE5001").f, sec(fz)); eq("9 carpeta efectivo", car.find(p => p.nn === "NE5002").f, sec(hoyCcs)); }
+
 console.log(ok + " bien, " + mal + " mal"); if(mal) process.exit(1);

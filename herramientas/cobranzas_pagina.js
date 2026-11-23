@@ -1608,7 +1608,7 @@ function admRegCard(c){
     <div class="adbx">${partes.map(p => `<span class="mtl">${mtChip(p.k)}${hechas.indexOf(p.k) >= 0 ? "Ya está en Holded" : "Va a la nota"}</span><b class="num">${money(p.m)}</b><small>en ${esc(p.cta)}${esc(admParteTxt(c, p))}</small>`).join("")}
       ${Number(c.iv) > 0 ? `<span>IVA cobrado (no va a Holded)</span><b class="num">${cbM(Number(c.iv), { tar:c.tb === "b" ? "b" : "u" })}</b>` : ""}
       ${c.fa && ret && ret.rt > 0 ? `<small class="adret">Retuvo ${ret.rt} % · ${ret.rec ? "comprobante recibido" : "comprobante pendiente"}</small>` : ""}
-      <small>Fecha del pago en Holded: ${esc(cbFecha2(c.fh || ""))}</small></div>
+      <small>Fecha del pago en Holded: ${esc(cbFecha2(c.fh || ""))}${c.fhe && c.fhe !== c.fh ? " · el efectivo, el " + esc(cbFecha2(c.fhe)) + " (hoy, cuando lo recibes)" : ""}</small></div>
     ${av.map(a => `<div class="msg">${esc(a)}</div>`).join("")}${admDcHtml(c)}`;
   const dcPa = c.dc > 0 && c.dce === "por aprobar";
   if(busy) h += `<button class="send" disabled>REGISTRANDO EN HOLDED…</button>`;
