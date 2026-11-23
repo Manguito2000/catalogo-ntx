@@ -326,3 +326,37 @@ header.top,.nav,.bar{will-change:transform}
 .seg.tabs.ti4 button[aria-pressed="true"] .pill{box-shadow:0 0 0 2px var(--ink)}
 .tlb{white-space:nowrap;font-weight:700}
 /*FIN-COBRANZAS*/
+
+/* ---------- un pago para varias notas ---------- */
+.cbpasos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;list-style:none;margin:0;padding:0}
+.cbpasos li{display:flex;align-items:center;justify-content:center;gap:4px;min-height:32px;border-radius:16px;border:1.5px solid var(--line);background:var(--surface);color:var(--mut);font-size:12.5px;font-weight:700;text-align:center}
+.cbpasos li.hecho{border-color:var(--ink);color:var(--ink)}
+.cbpasos li.ahora{background:var(--ink);border-color:var(--ink);color:var(--surface);font-weight:800}
+.mrl{padding:0;overflow:hidden;gap:0}
+.mrn{display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.mrn:last-child{border-bottom:0}
+.mrn input{flex:none;width:24px;height:24px;margin:0;accent-color:var(--red)}
+.mrn.on{background:var(--bg)}
+.mrn.off{opacity:.5;cursor:not-allowed}
+.mrt{display:grid;gap:3px;flex:1;min-width:0}
+.mrt .n{font-size:24px;line-height:1}
+.mrt small{font-size:12.5px;font-weight:600;color:var(--mut)}
+.mrn>b{flex:none;font-size:24px}
+.mrf{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:2px 2px 0;font-weight:700}
+.mrf b{font-size:28px;line-height:1}
+.mrlink{margin:0}
+.mrx{padding-top:9px}
+.mrh{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px}
+.mrr{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:74px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.mrd{display:grid;justify-items:end;gap:4px;flex:none}
+.mrd .mrs{display:flex;align-items:center;gap:6px}
+.mrd .mrs small{font-size:12px;font-weight:700;color:var(--mut)}
+.mrv{font-size:28px;line-height:1}
+.mra .fld{width:130px;text-align:right;font-size:20px;padding:8px 10px}
+.mrsr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.mrtot{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:12px 14px;background:var(--bg);font-weight:700}
+.mrtot b{font-size:26px;line-height:1}
+.mrsb{margin:10px 14px 12px}
+.mrl .cbe{padding:0 14px 12px}
+.mrpago{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.mrpago>b{font-size:30px;line-height:1;flex:none}

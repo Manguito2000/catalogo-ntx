@@ -15,7 +15,11 @@ var COB_COLS = ["Recibo", "Fecha", "Vendedor", "Cliente", "Nota", "Cobrado $", "
   "Tarifa", "Desc. divisas %", "Abono a la nota $", "Factura",    // columnas nuevas al final (nov 2026): BCV o USD, descuento por pago en divisas, abono en dólares de la nota, factura AdriMan de la nota
   "Mercantil Panamá $", "IVA cobrado $", "Monto Bs", "Tasa BCV", "Fecha del pago", "Cuenta destino", "Destino leído", "Cuenta Holded", "Captura", "Lectura", "Avisos",
   "Confirmado ts", "Cuenta real Holded", "Diferencia", "Aviso del vendedor",
-  "Origen", "Registro Holded", "Revisión admin"];
+  "Origen", "Registro Holded", "Revisión admin",
+  "Grupo", "Notas del grupo", "Saldo a favor"];
+// (23 nov 2026) un pago para varias notas: el teléfono manda una fila por nota, todas con el mismo «Grupo» (id del pago) y el mismo número de recibo.
+// «Notas del grupo» = "NE4240 + NE4262" (para leerlo en la hoja y en Holded) · «Saldo a favor» = lo que sobró del pago, por forma de pago, solo en la primera fila
+// ({"ze":6.82}); no abona a ninguna nota ni va a Holded: administración decide qué hacer con él.
 // (22 nov 2026, parte 3) Origen = "admin" en los cobros que registra administración (serie A-) · Registro Holded = partes ya pagadas en Holded desde la app
 // (si un registro se corta a medias, al reintentar solo se paga lo que falta) · Revisión admin = cuándo administración dejó una diferencia de cuenta como está
 // (22 nov 2026, parte 2) cuándo se confirmó (para la ventana de la semana), en qué cuenta(s) de Holded quedó de verdad, si no coincide con la del recibo, y cuándo avisó el vendedor
@@ -81,6 +85,7 @@ function cobroNuevo(tag, q) {
   try { c = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(b64)).getDataAsString("UTF-8")); } catch (e) { return { estado: "error", msg: "No se pudo leer el cobro" }; }
   var num = function (x) { x = Math.round((Number(x) || 0) * 100) / 100; return x > 0 && x < 1e6 ? x : 0; };
   var uid = String(c.id || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 40), nid = String(c.n || "").replace(/[^a-f0-9]/g, "");
+  var gr = String(c.gr || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 40); if (gr.length < 8) gr = "";   // pago para varias notas: una fila por nota, mismo grupo
   var ef = num(c.ef), us = num(c.us), ze = num(c.ze), mp = num(c.mp), bs = num(c.bs), nom = Math.round((ef + us + ze + mp + bs) * 100) / 100, ab = num(c.ab), div = ef + us + ze + mp;
   if (uid.length < 8 || nid.length !== 24) return { estado: "error", msg: "Cobro incompleto" };
   if (nom <= 0) return { estado: "error", msg: "El monto debe ser mayor que cero" };
@@ -110,9 +115,18 @@ function cobroNuevo(tag, q) {
     var props = PropertiesService.getScriptProperties(), n = Number(props.getProperty(ckey) || 0) + 1, ahora = new Date();
     var pre = adm ? "A" : prefijoRecibo(tag), rec = pre + "-" + ("000" + n).slice(-4);
     // El teléfono propone el número (así entrega el recibo en el momento, incluso sin conexión). Se respeta si es de este vendedor y nadie lo usó.
-    var prop = /^([A-Z]+)-(\d{4,6})$/.exec(String(c.rec || ""));
-    if (prop && prop[1] === pre && !usado(c.rec)) { rec = String(c.rec); n = Math.max(n - 1, Number(prop[2])); }
-    else while (usado(rec)) { n++; rec = pre + "-" + ("000" + n).slice(-4); }
+    // Pago para varias notas: las filas que siguen a la primera llevan su mismo número de recibo (aunque el receptor le haya cambiado el que propuso el teléfono).
+    var hermanos = gr ? filas.filter(function (f) { return f.gr === gr && f.tag === tagFila && f.estado !== "anulado"; }) : [];
+    if (hermanos.length) {
+      if (hermanos.some(function (f) { return f.notaId === nid; })) return { estado: "error", msg: "La nota " + String(nota.docNumber || "") + " ya está en este cobro" };
+      var cli = function (s) { return String(s || "").trim().toLowerCase(); };
+      if (cli(hermanos[0].cliente) !== cli(String(nota.contactName || c.cn || "").slice(0, 120))) return { estado: "error", msg: "Las notas de un mismo cobro deben ser del mismo cliente" };
+      rec = hermanos[0].recibo; n = 0;                                                    // el contador no se mueve: es el mismo recibo
+    } else {
+      var prop = /^([A-Z]+)-(\d{4,6})$/.exec(String(c.rec || ""));
+      if (prop && prop[1] === pre && !usado(c.rec)) { rec = String(c.rec); n = Math.max(n - 1, Number(prop[2])); }
+      else while (usado(rec)) { n++; rec = pre + "-" + ("000" + n).slice(-4); }
+    }
     var base = (nota.paymentsDetail || []).map(function (p) { return p.id; });
     var fila = []; COB_COLS.forEach(function () { fila.push(""); });
     var pon = function (k, v) { fila[COB[k]] = v; };
@@ -130,16 +144,18 @@ function cobroNuevo(tag, q) {
     pon("Cuenta Holded", cuentaHolded(ef, us, ze, mp, bs - iv, !!fac0));
     if (cts.indexOf("?") >= 0) avisos.push("La captura no muestra una cuenta de la empresa" + (cd ? " (" + cd + ")" : ""));
     var refsDe = function (t) { return String(t || "").split("·").map(refNorm).filter(function (x) { return x.length >= 6; }); }, mias = refsDe(c.rf);
-    if (mias.length) filas.forEach(function (f) { if (f.estado !== "anulado" && refsDe(f.ref).some(function (x) { return mias.indexOf(x) >= 0; })) avisos.push("Referencia repetida: ya está en el recibo " + f.recibo + " (" + f.vendedor + ", nota " + f.nota + ")"); });
+    var gn = gr ? tx(c.gn, 200) : "", sf = gr && !hermanos.length ? sfLee(c.sf) : {};          // lo que sobró del pago va solo en la primera fila del grupo
+    pon("Grupo", gr); pon("Notas del grupo", gn); if (Object.keys(sf).length) pon("Saldo a favor", JSON.stringify(sf));
+    if (mias.length) filas.forEach(function (f) { if (f.estado !== "anulado" && !(gr && f.gr === gr) && refsDe(f.ref).some(function (x) { return mias.indexOf(x) >= 0; })) avisos.push("Referencia repetida: ya está en el recibo " + f.recibo + " (" + f.vendedor + ", nota " + f.nota + ")"); });
     if (avisos.length) pon("Avisos", avisos.join(" · "));
     if (ab < 0.01 && iv > 0) { pon("Estado", "confirmado"); pon("Observación", "Solo IVA: no se registra en Holded"); pon("Confirmado el", fecha(ahora.toISOString())); pon("Confirmado ts", Math.floor(ahora.getTime() / 1000)); }   // nada que conciliar
     var fac = fcDeTags(nota.tags); if (fac) pon("Factura", "'" + fac[0]);   // el pago de una nota facturada se registra con su número de factura
     pon("dispositivo", corto(String(q.d || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 40)));
     hoja.appendRow(fila);
-    props.setProperty(ckey, String(n));
+    if (n) props.setProperty(ckey, String(n));
     var filas2 = leerCobros(hoja), f = filas2.filter(function (x) { return x.uid === uid; })[0];
     var aviso = avisos.filter(function (a) { return /^Referencia repetida/.test(a); })[0];
-    var out = { estado: "ok", cobro: vista(f), saldoHolded: pend, aviso: aviso ? aviso + ". Si es un mismo pago repartido en dos notas, está bien; si no, revísalo." : "" };
+    var out = { estado: "ok", cobro: vista(f), saldoHolded: pend, aviso: aviso ? aviso + ". Si es un mismo pago para varias notas, la próxima vez regístralo con «Este pago cubre varias notas»; si no, revísalo." : "" };
     if (adm && f.estado === "cobrado") {                                                  // administración ya tiene el dinero: se registra en Holded de una vez
       try { out.reg = registrarFila(hoja, filas2, f); } catch (e) { out.reg = { error: String(e && e.message || e) }; }
       out.cobro = vista(f);
@@ -150,10 +166,14 @@ function cobroNuevo(tag, q) {
 function cobroAnular(tag, q) {
   var rec = String(q.r || ""), lock = LockService.getScriptLock(); lock.waitLock(25000);
   try {
-    var hoja = hojaCobros(), f = leerCobros(hoja).filter(function (x) { return x.recibo === rec && x.tag === tag && x.org !== "admin"; })[0];   // los de administración no los anula el vendedor
+    var hoja = hojaCobros(), filas = leerCobros(hoja), f = filas.filter(function (x) { return x.recibo === rec && x.tag === tag && x.org !== "admin" && x.estado !== "anulado"; })[0];   // los de administración no los anula el vendedor
     if (!f) return { estado: "error", msg: "No encontré ese recibo" };
-    if (f.estado !== "cobrado" && f.estado !== "revisar") return { estado: "error", msg: "Ese cobro ya está " + f.estado + " y no se puede anular" };
-    escribir(hoja, f.fila, { "Estado": "anulado", "Observación": "Anulado por el vendedor el " + fecha(new Date().toISOString()) });
+    // pago para varias notas: el recibo es uno solo, así que se anulan todas sus partes juntas (y ninguna si alguna ya está confirmada)
+    var partes = f.gr ? filas.filter(function (x) { return x.gr === f.gr && x.tag === tag && x.org !== "admin" && x.estado !== "anulado"; }) : [f];
+    var hecha = partes.filter(function (x) { return x.estado !== "cobrado" && x.estado !== "revisar"; })[0];
+    if (hecha) return { estado: "error", msg: partes.length > 1 ? "La parte de la nota " + hecha.nota + " ya está " + hecha.estado + ": este cobro no se puede anular. Avisa a administración." : "Ese cobro ya está " + hecha.estado + " y no se puede anular" };
+    var obs = "Anulado por el vendedor el " + fecha(new Date().toISOString());
+    partes.forEach(function (x) { escribir(hoja, x.fila, { "Estado": "anulado", "Observación": obs }); });
     return { estado: "ok", cobros: cobrosDe(tag) };
   } finally { lock.releaseLock(); }
 }
@@ -196,7 +216,8 @@ function cobroAvisar(tag, q) {
 }
 function vista(f) { return { rec: f.recibo, id: f.uid, n: f.notaId, nn: f.nota, cn: f.cliente, t: f.ts, nom: f.nominal, ab: f.abono, ef: f.ef, us: f.us, ze: f.ze, mp: f.mp, bs: f.bs, ta: f.tasa, rf: f.ref, est: f.estado, obs: f.obs, pg: f.pagos, dd: f.dd, bv: f.bv || (f.bv === 0 && f.iv ? 0 : null), tb: f.tarifa === "BCV" ? "b" : "", fa: f.fa || "",
   iv: f.iv, bsb: f.bsb, tbc: f.tbc, fp: f.fp, ct: f.ct, cap: capLinks(f.cap).length, av: f.av,
-  tsc: f.tsc || 0, ch: f.ch, cr: f.cr, dif: f.rva ? "" : f.dif, avv: f.avv, ad: f.org === "admin" ? 1 : 0 }; }   // diferencia que administración dejó como está: ya no se marca
+  tsc: f.tsc || 0, ch: f.ch, cr: f.cr, dif: f.rva ? "" : f.dif, avv: f.avv, ad: f.org === "admin" ? 1 : 0,
+  gr: f.gr || "", gn: f.gn || "", sf: f.sf || {} }; }   // pago para varias notas: grupo, sus notas y lo que sobró (solo en la primera fila)   // diferencia que administración dejó como está: ya no se marca
 /* fecha aaaa-mm-dd de una celda (texto o fecha de la hoja) */
 function ymd(v) { if (v instanceof Date) return Utilities.formatDate(v, "America/Caracas", "yyyy-MM-dd"); var s = String(v || "").replace(/^'/, ""); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ""; }
 
@@ -359,11 +380,19 @@ function leerCobros(hoja) {
       ct: String(r[COB["Cuenta destino"]] || ""), ch: String(r[COB["Cuenta Holded"]] || ""), cap: String(r[COB["Captura"]] || ""), av: String(r[COB["Avisos"]] || ""),
       tsc: N(r[COB["Confirmado ts"]]), cr: String(r[COB["Cuenta real Holded"]] || ""), dif: String(r[COB["Diferencia"]] || ""),
       avv: String(r[COB["Aviso del vendedor"]] || "").split(" |")[0], avvTs: N(String(r[COB["Aviso del vendedor"]] || "").split(" |")[1]),
-      org: String(r[COB["Origen"]] || ""), reg: J(r[COB["Registro Holded"]]), rva: String(r[COB["Revisión admin"]] || "") });
+      org: String(r[COB["Origen"]] || ""), reg: J(r[COB["Registro Holded"]]), rva: String(r[COB["Revisión admin"]] || ""),
+      gr: String(r[COB["Grupo"]] || ""), gn: String(r[COB["Notas del grupo"]] || ""), sf: sfLee(r[COB["Saldo a favor"]]) });
   }
   return out;
 }
 function escribir(hoja, fila, valores) { for (var k in valores) hoja.getRange(fila, COB[k] + 1).setValue(valores[k]); }
+/* saldo a favor de un pago para varias notas: {"ze":6.82} → solo formas de pago conocidas y montos positivos */
+function sfLee(x) {
+  var o = x; if (typeof o === "string") { try { o = JSON.parse(o || "{}"); } catch (e) { o = {}; } }
+  var out = {}; if (!o || typeof o !== "object") return out;
+  ["ef", "us", "ze", "mp", "bs"].forEach(function (k) { var v = Math.round((Number(o[k]) || 0) * 100) / 100; if (v > 0 && v < 1e6) out[k] = v; });
+  return out;
+}
 function holded(ruta) {
   var k = PropertiesService.getScriptProperties().getProperty("HOLDED_KEY");
   if (!k) throw new Error("Falta la propiedad HOLDED_KEY");
@@ -603,7 +632,7 @@ function capturaGuardar(b) {
   var uid = String((b.x || {}).id || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 40), lock = LockService.getScriptLock(); lock.waitLock(25000);
   try {
     var esAdm = !!ADMIN && String(b.k || "") === ADMIN;
-    var hoja = hojaCobros(), f = leerCobros(hoja).filter(function (x) { return x.uid === uid && (x.tag === tag || esAdm); })[0];
+    var hoja = hojaCobros(), filas = leerCobros(hoja), f = filas.filter(function (x) { return x.uid === uid && (x.tag === tag || esAdm); })[0];
     if (!f) return { estado: "error", msg: "No encontré el cobro" };                      // aún no llega: el teléfono lo intenta luego
     var i = Math.max(0, Math.min(3, Number((b.x || {}).i) || 0)), links = String(f.cap || "").split(" · ");   // varias capturas: un enlace por posición
     if (/^https?:/.test(links[i] || "")) return { estado: "ok", repetido: true };
@@ -613,6 +642,8 @@ function capturaGuardar(b) {
     for (var j = 0; j < i; j++) if (!links[j]) links[j] = "-";
     links[i] = arch.getUrl();
     escribir(hoja, f.fila, { "Captura": links.join(" · ") });
+    // pago para varias notas: la captura se sube una vez (con la primera fila) y queda enlazada en todas las partes del recibo
+    if (f.gr) filas.forEach(function (x) { if (x.gr === f.gr && x.uid !== f.uid && x.tag === f.tag) escribir(hoja, x.fila, { "Captura": links.join(" · ") }); });
     return { estado: "ok" };
   } finally { lock.releaseLock(); }
 }
@@ -821,7 +852,7 @@ function registrarFila(hoja, filas, f) {
   var faltan = partes.filter(function (p) { return hechas.indexOf(p.k) < 0; }), porPagar = adRd(faltan.reduce(function (s, p) { return s + p.m; }, 0)), pend = Number(nota.paymentsPending) || 0;
   if (!partes.length) throw new Error("Este cobro no tiene montos para registrar en Holded.");
   if (porPagar > pend + 0.5) return { alto: true, msg: "En Holded la nota " + f.nota + " solo tiene $" + pend.toFixed(2) + " pendientes y este cobro registra $" + porPagar.toFixed(2) + ". Revisa la nota en Holded." };
-  var fh = tsHolded(fechaHolded(f)), desc = ("Recibo " + f.recibo + " · " + f.vendedor + (f.ref ? " · ref. " + f.ref : "")).slice(0, 140);
+  var fh = tsHolded(fechaHolded(f)), desc = ("Recibo " + f.recibo + " · " + f.vendedor + (f.gn ? " · " + f.gn : "") + (f.ref ? " · ref. " + f.ref : "")).slice(0, 140);   // pago para varias notas: la misma referencia en cada nota
   for (var i = 0; i < faltan.length; i++) {
     var p = faltan[i], r = cobHttp("post", "documents/invoice/" + f.notaId + "/pay", { date: fh, amount: p.m, treasury: CUENTA_ID[p.cta], desc: desc });
     if (!((r.codigo === 200 || r.codigo === 201) && !(r.datos && r.datos.status === 0))) {
