@@ -360,3 +360,32 @@ header.top,.nav,.bar{will-change:transform}
 .mrl .cbe{padding:0 14px 12px}
 .mrpago{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .mrpago>b{font-size:30px;line-height:1;flex:none}
+
+/* ---------- descuento de contado y nota del vendedor (23 nov 2026) ---------- */
+.cbdc{display:grid;gap:8px;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg)}
+.cbdc.on{border-color:var(--az);background:var(--az-bg)}
+.cbdc .cbdck{display:flex;align-items:flex-start;gap:12px;cursor:pointer}
+.cbdc .cbdck input{width:24px;height:24px;flex:none;margin-top:1px;accent-color:var(--az)}
+.cbdc .cbdck>span{display:grid;gap:2px;font-size:15px;font-weight:700}
+.cbdc .cbdck small{font-size:12px;font-weight:600;color:var(--mut)}
+.cbdc .cbdcp{display:grid;gap:5px}
+.cbdci{display:grid;gap:3px;font-size:13px;font-weight:600}
+.cbdci .ok{color:var(--ok);font-weight:700}
+.cbdci .pa{color:var(--warn);font-weight:700}
+.cbnv{min-height:58px;resize:vertical;font:inherit;font-weight:500}
+/* ADMIN: la nota que deja el vendedor, bien visible */
+.nvbox{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:10px;background:var(--warn-bg);border:1.5px solid var(--warn);border-left-width:7px}
+.nvbox .nvi{font-size:24px;line-height:1;flex:none}
+.nvbox b{display:block;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--warn);margin-bottom:2px}
+.nvbox p{margin:0;font-size:17px;line-height:1.35;font-weight:700;color:var(--ink);overflow-wrap:anywhere;white-space:pre-wrap}
+/* ADMIN: bloque de descuento de contado */
+.dcb{display:grid;gap:8px;padding:10px 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);font-size:13px}
+.dcb>b{font-size:15px}
+.dcb>span{font-weight:600;color:var(--mut)}
+.dcb.pa{border-color:var(--warn);background:var(--warn-bg)}
+.dcb.pa>b{color:var(--warn)}
+.dcb.ok{border-color:var(--ok)}
+.dcb.ok>b{color:var(--ok)}
+.dcr{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
+.dcr label{display:grid;gap:4px;font-size:12px;font-weight:700}
+.dcr .fld{max-width:90px}

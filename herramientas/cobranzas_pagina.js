@@ -1,13 +1,13 @@
 /*COBRANZAS*/
 /* Pestaña Cobranzas del portal de ventas NTX (herramientas/COBRANZAS.md). Se inyecta en el catálogo con herramientas/aplicar_cobranzas.py.
    Datos: S.nt (notas del vendedor, vienen de datos.json) + cobros que anota el vendedor (los guarda y concilia el receptor de Apps Script). */
-const CB = { tab:"pend", solo:false, nota:null, edit:null, rec:null, last:"", url:{}, f:{ ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"" }, err:"", busy:false, ok:null, cobros:null, cola:[], avisos:[], del:null, t0:0, img:{}, cargado:false, sync:"", sol:[], ret:{}, fac:null, facTxt:"", facErr:"", facBusy:false, msgOk:"", up:"", caps:[], capCola:[], tasas:[], mpOn:false, bsOn:false, on:{} };
+const CB = { tab:"pend", solo:false, nota:null, edit:null, rec:null, last:"", url:{}, f:{ ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"", dc:"", nv:"" }, err:"", busy:false, ok:null, cobros:null, cola:[], avisos:[], del:null, t0:0, img:{}, cargado:false, sync:"", sol:[], ret:{}, fac:null, facTxt:"", facErr:"", facBusy:false, msgOk:"", up:"", caps:[], capCola:[], tasas:[], mpOn:false, bsOn:false, on:{} };
 const LSK = "ntx-cobros", LSQ = "ntx-cobros-cola", CAPLS = "ntx-cap-cola";
 /* Descuento BCV (%): sale de config.json del repositorio (un solo número para todo el sistema). Mientras carga, el último conocido o 15. */
 let DBCV = 15; try{ DBCV = Number(localStorage.getItem("ntx-dbcv")) || 15; }catch(e){}
 const FBCV = () => 1 - DBCV / 100;          // dólares reales por cada dólar BCV
 fetch("config.json?" + Date.now(), { cache:"no-store" }).then(r => r.json()).then(j => { const iv = Number(j && j.iva); if(iv > 0 && iv < 50 && iv !== IVAP){ IVAP = iv; try{ localStorage.setItem("ntx-iva", String(iv)); }catch(e){} if(VISTA === "cobros") cobRender(); }
-  const v = Number(j && j.descuento_bcv);
+  cbCfgContado(j); const v = Number(j && j.descuento_bcv);
   if(v > 0 && v < 90 && v !== DBCV){ DBCV = v; try{ localStorage.setItem("ntx-dbcv", String(v)); }catch(e){} if(VISTA === "cobros") cobRender(); } }).catch(() => {});
 let IVAP = 16; try{ IVAP = Number(localStorage.getItem("ntx-iva")) || 16; }catch(e){}   // IVA (%): un solo número, en config.json (iva)
 const r2 = n => Math.round(n * 100) / 100;
@@ -56,6 +56,81 @@ function cbIvaDetecta(n, saldoAntes, c){
 function cbTasaDe(f){
   const t = (CB.tasas || []).filter(x => x && x[0] && (!f || x[0] <= f)).sort((a, b) => a[0] < b[0] ? 1 : -1)[0];
   return t ? Number(t[1]) || 0 : 0;
+}
+/*CONTADO*/
+/* Descuento de contado en notas a crédito (23 nov 2026): copia exacta de herramientas/contado.js (probada aparte con contado_pruebas.js; si se cambia uno, cambiar el otro). */
+/* Descuento de contado en notas a crédito (23 nov 2026, regla de Mango). Función pura: sirve igual en el receptor (Apps Script) y en la página.
+   Si el cliente paga dentro de los primeros N días hábiles de la nota (config.json → contado_dias_habiles, hoy 4), el descuento
+   (config.json → descuento_contado, hoy 15 %) se aplica solo y administración recibe el aviso. Si paga después, queda por aprobar.
+
+   Cómo se cuentan los días hábiles: el día en que se hizo la nota NO cuenta; se cuentan de lunes a viernes, sin feriados
+   (config.json → feriados), hasta el día del pago inclusive. Nota del lunes pagada el viernes = 4 días hábiles → automático.
+   Día del pago = la fecha del pago (la de la captura o la que se escribió); si falta, hoy. Nunca después de hoy ni antes de la nota.
+
+   Fechas siempre como texto aaaa-mm-dd (día de calendario en Venezuela). */
+function chDia(s) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "")); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN; }
+function chTxt(t) { var d = new Date(t); return d.getUTCFullYear() + "-" + ("0" + (d.getUTCMonth() + 1)).slice(-2) + "-" + ("0" + d.getUTCDate()).slice(-2); }
+/* días hábiles DESPUÉS de "desde" y hasta "hasta" inclusive (0 si es el mismo día o antes) */
+function diasHabiles(desde, hasta, feriados) {
+  var a = chDia(desde), b = chDia(hasta), fer = {}, n = 0;
+  if (isNaN(a) || isNaN(b)) return NaN;
+  (feriados || []).forEach(function (f) { fer[String(f)] = 1; });
+  for (var t = a + 86400000; t <= b && n < 400; t += 86400000) {
+    var w = new Date(t).getUTCDay();
+    if (w !== 0 && w !== 6 && !fer[chTxt(t)]) n++;
+  }
+  return n;
+}
+/* ¿El descuento de contado se aplica solo?
+   o = { nota: "aaaa-mm-dd", pago: "aaaa-mm-dd" | "", hoy: "aaaa-mm-dd", limite: 4, feriados: [...] }
+   → { dh: días hábiles hasta el pago, pago: día usado, auto: true | false } */
+function contadoDecide(o) {
+  var hoy = o.hoy, pago = /^\d{4}-\d{2}-\d{2}$/.test(String(o.pago || "")) ? String(o.pago) : hoy;
+  if (chDia(pago) > chDia(hoy)) pago = hoy;
+  if (chDia(pago) < chDia(o.nota)) pago = o.nota;
+  var lim = Number(o.limite) >= 0 ? Number(o.limite) : 4, dh = diasHabiles(o.nota, pago, o.feriados);
+  return { dh: dh, pago: pago, auto: !isNaN(dh) && dh <= lim };
+}
+/* Monto del descuento: sobre el total de la nota SIN descuento (Holded aplica el descuento a toda la nota). */
+function contadoMonto(baseNota, pct) { return Math.round((Number(baseNota) || 0) * (Number(pct) || 0)) / 100; }
+/* Descuento que hace cuadrar lo recibido (para administración): el % con que la nota queda saldada con lo que ya entró y lo que se va a registrar.
+   pendiente = lo que Holded dice que falta HOY (sin descuento), recibido = lo que se va a registrar (y los demás cobros sin registrar), base = total sin descuento.
+   → % con dos decimales (0 si no hace falta descuento; null si haría falta más del 50 %). */
+function contadoCuadre(pendiente, recibido, base) {
+  var falta = Math.round(((Number(pendiente) || 0) - (Number(recibido) || 0)) * 100) / 100;
+  if (falta <= 0.009) return 0;
+  if (!(base > 0)) return null;
+  var p = Math.round(falta / base * 10000) / 100;
+  return p > 50 ? null : p;
+}
+/*FINCONTADO*/
+let DCP = 15, DCL = 4, DCF = [];   // % normal, días hábiles para que se aplique solo, feriados (config.json; último conocido si no hay conexión)
+try{ DCP = Number(localStorage.getItem("ntx-dcp")) || 15; const l = localStorage.getItem("ntx-dcl"); if(l !== null && l !== "" && Number(l) >= 0 && Number(l) < 30) DCL = Number(l); DCF = JSON.parse(localStorage.getItem("ntx-dcf") || "[]") || []; }catch(e){}
+function cbCfgContado(j){
+  if(!j) return; const d = Number(j.descuento_contado), l = Number(j.contado_dias_habiles);
+  if(d > 0 && d < 50) DCP = d; if(l >= 0 && l < 30) DCL = l; if(Array.isArray(j.feriados)) DCF = j.feriados.map(String);
+  try{ localStorage.setItem("ntx-dcp", String(DCP)); localStorage.setItem("ntx-dcl", String(DCL)); localStorage.setItem("ntx-dcf", JSON.stringify(DCF)); }catch(e){}
+}
+/* día de calendario (aaaa-mm-dd) de una fecha de Holded */
+const cbDiaTxt = ts => { const d = new Date((ts + 7200) * 1000); return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0"); };
+/* ¿este cobro pidió el descuento de contado y no se lo rechazaron? */
+const cbDcCont = c => !!c && Number(c.dc) > 0 && c.est !== "anulado" && c.est !== "rechazo" && c.dce !== "rechazado";
+/* lo que ese descuento le quita a lo que falta de la nota: solo si ya está aceptado y Holded todavía no lo tiene (nota sin descuento en los datos) */
+const cbDcPc = (c, n) => cbDcCont(c) && (c.dce === "automático" || c.dce === "aprobado") && !(n.desc > 0) ? Number(c.dcm) || 0 : 0;
+const cbDcTxt = c => !c || !(Number(c.dc) > 0) ? "" : c.dce === "rechazado" ? "Descuento de " + c.dc + " % no aprobado: la nota sigue debiendo " + money(c.dcm)
+  : "Descuento de contado " + c.dc + " % (−" + money(c.dcm) + ") · " + (c.dce === "por aprobar" ? "por aprobar" + (c.dh != null ? " (pagó al día hábil " + c.dh + ")" : "") : c.dce === "aprobado" ? "aprobado" : "aplicado solo" + (c.dh != null ? " (día hábil " + c.dh + " de " + DCL + ")" : ""));
+/* ¿esta nota admite el descuento de contado? Solo notas en dólares, sin descuento ni factura, y sin otro cobro que ya lo pidió. */
+function cbDcOk(n, ed){
+  if(!n || esB(n) || n.fac || n.desc > 0 || CB.multi || !(DCP > 0)) return false;
+  return !cbCobros().some(c => c.n === n.id && !(ed && c.id === ed.id) && cbDcCont(c));
+}
+/* el descuento que el vendedor está escribiendo ahora (CB.f.dc = % o "" si no lo marcó): { pct, dcm, dec } o null */
+function cbDcDraft(n, ed){
+  if(!cbDcOk(n, ed) || CB.f.dc === "" || CB.f.dc == null) return null;
+  const pct = Math.round((Number(String(CB.f.dc).replace(",", ".")) || 0) * 100) / 100; if(!(pct > 0 && pct <= 50)) return null;
+  const adm = !!(CB.adNota && CB.adNota[0] === n.id && VISTA === "admin");
+  const dec = adm ? { dh:null, pago:"", auto:true, adm:true } : contadoDecide({ nota:cbDiaTxt(n.fecha), pago:CB.f.fp, hoy:cbHoy(), limite:DCL, feriados:DCF });
+  return { pct, dcm:Math.round(cbNeto(n) * pct) / 100, dec, adm };
 }
 const cbHoy = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 const cbCom = (v, dec) => { if(!(v > 0)) return ""; let s = Number(v).toFixed(dec == null ? 2 : dec); if(dec > 2) s = s.replace(/0+$/, "").replace(/\.$/, ""); return s.replace(".", ","); };
@@ -354,8 +429,9 @@ function cbVisible(n){
   let pc = 0; const tengo = new Set(n.pagos.map(p => p[0]));
   cbCobros().forEach(c => {
     if(c.n !== n.id) return;
-    if(pendiente(c)) pc += cbBv(c, n);
-    else if(c.est === "confirmado" && (c.pg || []).some(p => !tengo.has(p[0]))) pc += cbBv(c, n);   // confirmado, pero los datos de Holded que tiene el teléfono aún no traen ese pago
+    if(pendiente(c)) pc += cbBv(c, n) + cbDcPc(c, n);
+    else if(c.est === "confirmado" && (c.pg || []).some(p => !tengo.has(p[0]))) pc += cbBv(c, n) + cbDcPc(c, n);   // confirmado, pero los datos de Holded que tiene el teléfono aún no traen ese pago
+    else if(c.est === "confirmado") pc += cbDcPc(c, n);                                                           // pago ya en Holded; el descuento aceptado aún no (administración lo pone)
   });
   if(CB.adX && n.id === CB.adX.id && VISTA === "admin") (CB.adX.pc || []).forEach(p => { if(!cbCobros().some(c => c.id === p[0])) pc += Number(p[4]) || 0; });   // cobros de los vendedores aún sin registrar
   pc = r2(pc); return { pc, saldo:Math.max(0, r2(n.sal - pc)) };
@@ -385,7 +461,7 @@ function cobNav(v){
   if(v !== "admin"){ try{ admToast(""); }catch(e){} }
   $("navCob").setAttribute("aria-current", c ? "page" : "false"); $("navPed").setAttribute("aria-current", c || v === "admin" ? "false" : "page");
 }
-const cbF0 = () => ({ ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"" });
+const cbF0 = () => ({ ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"", dc:"", nv:"" });
 const cbSt = c => c.est === "confirmado" ? `<span class="st ok">Confirmado</span>` : c.est === "revisar" ? `<span class="st low">Revisar</span>` : c.est === "rechazo" ? `<span class="st dif">No registrado</span>` : c.est === "cola" ? `<span class="st no">Sin enviar</span>` : `<span class="st az">Por confirmar</span>`;
 const cbStK = c => c.est === "confirmado" ? "ok" : c.est === "revisar" ? "am" : c.est === "rechazo" ? "dif" : c.est === "cola" ? "" : "pc";   // franja de color de la tarjeta
 const cbHora = t => t ? new Date(t * 1000).toLocaleString("es-VE", { day:"2-digit", month:"short", hour:"numeric", minute:"2-digit" }) : "";
@@ -493,10 +569,18 @@ function cbSaldoNota(){
   }
   const n = cbNotas().find(x => x.id === CB.nota); if(!n) return null; const x = Object.assign({ n }, cbVisible(n));
   const ed = CB.edit ? cbCobros().find(c => c.id === CB.edit && c.n === n.id && pendiente(c)) : null;
-  if(ed){ x.pc = Math.max(0, r2(x.pc - cbBv(ed, n))); x.saldo = Math.max(0, r2(n.sal - x.pc)); x.ed = ed; } else CB.edit = null;   // al corregir, el cobro viejo se anula: su monto vuelve a estar disponible
+  if(ed){ x.pc = Math.max(0, r2(x.pc - cbBv(ed, n) - cbDcPc(ed, n))); x.saldo = Math.max(0, r2(n.sal - x.pc)); x.ed = ed; } else CB.edit = null;   // al corregir, el cobro viejo se anula: su monto (y su descuento) vuelve a estar disponible
+  const dr = cbDcDraft(n, ed); if(dr){ x.dr = dr; x.saldoAnt = x.saldo; x.saldo = Math.max(0, r2(x.saldo - dr.dcm)); }   // descuento de contado que se está marcando: lo que falta ya cuenta con él
   return x;
 }
 /* pantalla de una nota: su saldo, los abonos ya anotados (con recibo, corregir y anular) y, si aún falta por cobrar, el formulario */
+/* casilla «Descuento de contado» del formulario de cobro (el texto de lo que pasa lo pone cbSum en #cbDcI) */
+function cbDcHtml(n, x){
+  if(!cbDcOk(n, x.ed)) return "";
+  const on = CB.f.dc !== "" && CB.f.dc != null, adm = !!(CB.adNota && CB.adNota[0] === n.id && VISTA === "admin");
+  return `<div class="cbdc w2${on ? " on" : ""}" id="cbDc"><label class="cbdck"><input type="checkbox" data-cb="dcon"${on ? " checked" : ""}><span><b>Descuento de contado</b><small>${adm ? "El cliente pagó casi de contado: se descuenta de lo que falta" : "Se lo diste al cliente porque pagó casi de contado"}</small></span></label>
+    ${on ? `<label class="cbdcp"><span>Descuento</span><span class="pct"><input class="fld num" id="cb_dc" data-cb-in="dc" type="text" inputmode="decimal" autocomplete="off" value="${esc(CB.f.dc)}"><b>%</b></span></label><div class="cbdci" id="cbDcI"></div>` : ""}</div>`;
+}
 function cbFormHtml(){
   const x = cbSaldoNota(); if(!x){ CB.nota = null; CB.edit = null; if(CB.multi && CB.multi.paso !== "notas"){ CB.multi = null; cbCapLimpia(); } return ""; }
   const n = x.n, bcv = esB(n), ed = x.ed, c0 = cbCalc(n, CB.f, x.saldo), MU = x.multi;
@@ -507,7 +591,7 @@ function cbFormHtml(){
   let h = MU ? `<button class="txt" data-cb="multiback" style="justify-self:start">‹ Cambiar las notas</button><h2 class="bs">Registrar cobro</h2>${cbPasosHtml("pago")}
     <div class="box"><div class="sel"><span><b>${esc(cbCliente(n.cid))}</b><small>${esc(MU.map(q => q.n.num).join(" + "))}${bcv ? " · BCV" : ""}</small></span><span style="flex:none;text-align:right"><small>Falta por cobrar</small><b class="bs num" style="font-size:26px">${money(x.saldo)}</b>${bcv ? `<small class="tb">tasa BCV</small>` : ""}</span></div></div>`
   : `<button class="txt" data-cb="${ed ? "editx" : "volver"}" style="justify-self:start">‹ ${ed ? "Dejar el cobro como estaba" : adm ? "Volver a cobros" : "Volver a pendientes"}</button><h2 class="bs">${ed ? "Corregir cobro" : "Nota " + esc(n.num)}</h2>
-    <div class="box"><div class="sel"><span><b>${esc(cbCliente(n.cid))}</b><small>${esc(n.num)}${bcv ? " · BCV" : ""} · ${esc(cbVTxt(cbVence(n)) || "sin vencimiento")}</small></span><span style="flex:none;text-align:right"><small>Falta por cobrar</small><b class="bs num" style="font-size:26px">${money(x.saldo)}</b>${bcv ? `<small class="tb">tasa BCV</small>` : ""}</span></div>
+    <div class="box"><div class="sel"><span><b>${esc(cbCliente(n.cid))}</b><small>${esc(n.num)}${bcv ? " · BCV" : ""} · ${esc(cbVTxt(cbVence(n)) || "sin vencimiento")}</small></span><span style="flex:none;text-align:right"><small>Falta por cobrar</small><b class="bs num" style="font-size:26px">${money(x.saldo)}</b>${bcv ? `<small class="tb">tasa BCV</small>` : ""}${x.dr ? `<small class="num">con ${x.dr.pct} % de descuento (−${money(x.dr.dcm)})</small>` : ""}</span></div>
       ${x.pc >= 0.01 ? `<p class="hint num">Ya anotaste ${money(x.pc)} por confirmar</p>` : ""}</div>`;
   if(!MU && !ed && !adm && x.saldo >= 0.01 && cbMultiOk(n) && cbMultiCand(n.cid).length >= 2) h += `<button type="button" class="ghost mrlink" data-cb="multi" data-id="${esc(n.id)}">Este pago cubre varias notas</button>`;
   if(MU){}
@@ -516,7 +600,7 @@ function cbFormHtml(){
       (pc.length ? `<div class="msg">${pc.map(p => esc(p[2]) + " tiene por registrar el recibo " + esc(p[1]) + " (" + money(p[3]) + ")").join("<br>")}. Ya se descontó de lo que falta.</div>` : "") + `</div>`; }
   else if(!ed) h += cbFacBox(n, x);
   if(mios.length && !ed) h += `<div class="box"><span class="lbl">Abonos que anotaste</span>` + mios.map(c => `<div class="cba"><div class="h"><b class="bs num">${money(c.nom)}</b>${cbSt(c)}</div>
-      <div class="i num">${esc(c.rec || "Sin número")} · ${esc(cbHora(c.t))}${Math.abs(cbBv(c, n) - c.nom) >= 0.01 ? " · abona " + cbM(cbBv(c, n), n) : ""}</div><div class="i num">${cbMetHtml(c)}</div>${(c.est === "revisar" || c.est === "rechazo") && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
+      <div class="i num">${esc(c.rec || "Sin número")} · ${esc(cbHora(c.t))}${Math.abs(cbBv(c, n) - c.nom) >= 0.01 ? " · abona " + cbM(cbBv(c, n), n) : ""}</div><div class="i num">${cbMetHtml(c)}</div>${c.dc > 0 ? `<div class="i" style="color:var(--${c.dce === "por aprobar" || c.dce === "rechazado" ? "warn" : "ok"})">${esc(cbDcTxt(c))}</div>` : ""}${c.nv ? `<div class="i">Tu nota: ${esc(c.nv)}</div>` : ""}${(c.est === "revisar" || c.est === "rechazo") && c.obs ? `<div class="i" style="color:var(--warn)">${esc(c.obs)}</div>` : ""}
       <div class="f">${cbAcc(c)}</div></div>`).join("") + `</div>`;
   const soloIva = !MU && x.saldo < 0.01 && !!n.fac && cbIvaPend(n) >= 0.5;
   if(!MU && x.saldo < 0.01 && !ed && !soloIva) return h + `<div class="box"><p class="hint">Esta nota ya está cobrada por completo. Sale de tu lista cuando administración registre el pago en Holded. Si te equivocaste en un monto, toca «Corregir» en el abono.</p></div>`;
@@ -552,8 +636,9 @@ function cbFormHtml(){
       ${ed && bcv ? `<p class="hint">Nota a tasa BCV: los montos van en dólares BCV.</p>` : ""}
       ${n.fac ? `<p class="hint">${soloIva ? "El neto ya está cobrado. Si el cliente pagó el IVA aparte, anótalo aquí en bolívares." : "Nota facturada: si el pago trae el IVA, anota todo lo que entró; la app separa el neto del IVA."}</p>` : ""}
       ${ed ? "" : cbCapHtml()}
-      <div class="cbf">${campos}
-        <label><span>Referencia o comprobante (opcional)</span><input class="fld" id="cb_rf" data-cb-in="rf" type="text" autocomplete="off" maxlength="120" placeholder="Últimos dígitos, nombre del banco…" value="${esc(CB.f.rf)}"></label></div>
+      <div class="cbf">${campos}${MU ? "" : cbDcHtml(n, x)}
+        <label><span>Referencia o comprobante (opcional)</span><input class="fld" id="cb_rf" data-cb-in="rf" type="text" autocomplete="off" maxlength="120" placeholder="Últimos dígitos, nombre del banco…" value="${esc(CB.f.rf)}"></label>
+        ${MU ? "" : `<label class="w2"><span>Nota para administración (opcional)</span><textarea class="fld cbnv" id="cb_nv" data-cb-in="nv" rows="2" maxlength="300" placeholder="Ej.: le di el 15 % porque pagó casi de contado; el cliente pasa a retirar…">${esc(CB.f.nv)}</textarea></label>`}</div>
       <div class="cbsum" id="cbSum"></div><div class="cbe" id="cbErr"></div>
       <button class="send" id="cbGo" data-cb="${MU ? "multigo" : "guardar"}">${MU ? "CONTINUAR" : "GUARDAR COBRO"}</button></div>`;
 }
@@ -734,6 +819,13 @@ function cbColapsa(list){ const vistos = new Set(); return list.map(c => { if(!c
 /*FIN MULTI*/
 function cbSum(){
   const x = cbSaldoNota(), s = $("cbSum"); if(!x || !s) return; const n = x.n, c = cbCalc(n, CB.f, x.saldo), resto = r2(x.saldo - c.bv);
+  const di = $("cbDcI"); if(di){
+    const dr = x.dr; di.className = "cbdci" + (dr && !dr.dec.auto ? " pa" : "");
+    di.innerHTML = !dr ? `<span>Escribe el porcentaje (entre 0,01 y 50).</span>` : `<span>Descuento <b class="num">−${money(dr.dcm)}</b> · la nota queda en <b class="num">${money(r2(cbNeto(n) - dr.dcm))}</b></span>` +
+      (dr.adm ? `<span>Como es un cobro de administración, queda aprobado y se pone en Holded al guardar.</span>`
+        : dr.dec.auto ? `<span class="ok">Se aplica solo: el pago cae en el día hábil ${dr.dec.dh} de ${DCL}. Administración recibe el aviso.</span>`
+        : `<span class="pa">El pago cae en el día hábil ${dr.dec.dh} (el límite es ${DCL}): el descuento queda por aprobar por administración.</span>`) +
+      (c.bv > 0 && c.bv < x.saldo - 0.5 ? `<span>Con este descuento aún quedarían ${money(r2(x.saldo - c.bv))} por cobrar.</span>` : ""); }
   const br = $("cbBsRow"); if(br && !esB(n)) br.hidden = !(c.bs > 0 || cbNum(CB.f.bsb) > 0 || CB.bsOn); const dl = $("cbDd"); if(dl) dl.hidden = !(c.div > 0);
   const sobra = !x.multi && (c.bv > x.saldo + 0.5 || c.iv > cbIvaPend(n) + 0.5), sinTasa = !esB(n) && (c.bs > 0 || cbNum(CB.f.bsb) > 0) && !(cbNum(CB.f.ta) > 0), sinTasaB = esB(n) && cbNum(CB.f.bsb) > 0 && !(cbNum(CB.f.tb) > 0);
   s.innerHTML = esB(n)
@@ -805,7 +897,7 @@ function cbMerge(c){ CB.cobros = [c].concat((CB.cobros || []).filter(x => x.id !
 async function cbEnviar(o){
   let r;
   try{ r = await cbSrv("cobro", { x:cbB64({ id:o.id, rec:o.rec || "", n:o.n, ef:o.ef, us:o.us, ze:o.ze, mp:o.mp || 0, bs:o.bs, iv:o.iv || 0, ab:o.ab, bv:o.bv, dd:o.dd || 0, tb:o.tb || "", ta:o.ta || 0,
-    bsb:o.bsb || 0, tbc:o.tbc || 0, fp:o.fp || "", ct:o.ct || "", cd:o.cd || "", lx:o.lx || "", rf:o.rf || "", cn:o.cn, ...(o.gr ? { gr:o.gr, gn:o.gn || "", ...(o.sf ? { sf:o.sf } : {}) } : {}) }), ...(o.ad ? { k:S.adm } : {}) }); }catch(e){ return { net:true }; }
+    bsb:o.bsb || 0, tbc:o.tbc || 0, fp:o.fp || "", ct:o.ct || "", cd:o.cd || "", lx:o.lx || "", rf:o.rf || "", cn:o.cn, ...(o.dc > 0 ? { dc:o.dc } : {}), ...(o.nv ? { nv:o.nv } : {}), ...(o.gr ? { gr:o.gr, gn:o.gn || "", ...(o.sf ? { sf:o.sf } : {}) } : {}) }), ...(o.ad ? { k:S.adm } : {}) }); }catch(e){ return { net:true }; }
   if(r && r.estado === "ok" && r.cobro){ if(r.aviso) CB.avisos.push(r.aviso); return { ok:true, cobro:Object.assign(r.cobro, o.ad ? { ad:1 } : {}), reg:r.reg }; }
   if(r && r.estado === "no") return { err:"Este dispositivo ya no está autorizado. Habla con administración." };
   return { err:(r && r.msg) || "No se pudo guardar el cobro." };
@@ -867,6 +959,8 @@ async function cbGuardar(){
     lx:(lecs.map(l => [l.met, l.mon, l.monto, l.fecha + (l.fechaDe === "imagen" ? "(img)" : ""), l.hora, l.ref, l.ms ? "⏱" + (l.ms / 1000).toFixed(1) + "s/" + l.pas + "p" : ""].join(" ").trim())
       .concat(caps.filter(k => k.est === "error").map(k => "ERR " + (k.err || ""))).join(" | ") + (caps.length && OCR.t.baja ? " | lector bajado en " + Math.round(OCR.t.baja / 1000) + "s" : "") + (caps.length && OCR.t.red ? " | lector por red" : "")).slice(0, 300),
     rf:(CB.f.rf || "").trim().slice(0, 120), est:"cola", rec:"", fa:x.n.fac ? x.n.fac[0] : "", cap:caps.length };
+  const nv = String(CB.f.nv || "").trim().slice(0, 300); if(nv) o.nv = nv;
+  if(x.dr){ o.dc = x.dr.pct; o.dcm = x.dr.dcm; o.dce = x.dr.adm ? "aprobado" : x.dr.dec.auto ? "automático" : "por aprobar"; o.dh = x.dr.dec.dh; }   // el servidor lo vuelve a decidir; esto es lo que se ve si no hay conexión
   if(S.adm && CB.adNota && CB.adNota[0] === x.n.id && VISTA === "admin") o.ad = 1;
   o.rec = cbSigRec(!!o.ad);
   const r = await cbEnviar(o); CB.busy = false;
@@ -888,7 +982,7 @@ function cbSaldoRec(c){
 }
 function cbReciboTxt(c){
   c = cbUnido(c); const sr = cbSaldoRec(c), n = sr.n, saldo = sr.saldo;
-  return `Recibo ${c.rec} · ${c.cn} · ${c.unido ? "Notas" : "Nota"} ${c.nn} · Cobrado ${money(c.nom)}${saldo != null ? " · Saldo " + cbM(saldo, n) : ""}${c.unido && c.sfT > 0 ? " · Saldo a favor " + money(c.sfT) : ""}\nRecibo sujeto a verificación. NTX Original Parts`;
+  return `Recibo ${c.rec} · ${c.cn} · ${c.unido ? "Notas" : "Nota"} ${c.nn} · Cobrado ${money(c.nom)}${cbDcCont(c) ? " · Descuento de contado " + c.dc + " % (−" + money(c.dcm) + (c.dce === "por aprobar" ? ", por aprobar" : "") + ")" : ""}${saldo != null ? " · Saldo " + cbM(saldo, n) : ""}${c.unido && c.sfT > 0 ? " · Saldo a favor " + money(c.sfT) : ""}\nRecibo sujeto a verificación. NTX Original Parts`;
 }
 function cbImg(c){
   return new Promise(res => {
@@ -897,6 +991,7 @@ function cbImg(c){
     if(Number(c.bsb) > 0) filas.push(["Pagado en bolívares", "Bs " + cbCom(c.bsb) + (Number(c.tbc || c.ta) > 0 ? " a " + cbCom(Number(c.tbc || c.ta), 4) : "")]);
     if(Number(c.iv) > 0) filas.push(["IVA incluido en el pago", money(c.iv) + (b ? " BCV" : "")]);
     if(Number(c.dd) > 0) filas.push(["Descuento pago en divisas", c.dd + " %"]);
+    if(cbDcCont(c)) filas.push(["Descuento de contado " + c.dc + " %", "−" + money(c.dcm) + (c.dce === "por aprobar" ? " (por aprobar)" : "")]);
     if(c.unido){ (c.partes || []).forEach(p => filas.push(["Abonado a " + p.nn, money(p.bv) + (b ? " BCV" : "")])); if(c.sfT > 0) filas.push(["Saldo a favor del cliente", money(c.sfT)]); }
     else if(b && Math.abs(cbBv(c, n) - c.nom) >= 0.01) filas.push(["Abonado a la nota", money(cbBv(c, n)) + " BCV"]);
     if(c.ta && !(Number(c.bsb) > 0)) filas.push(["Tasa", String(c.ta)]); if(c.rf) filas.push(["Referencia", c.rf]);
@@ -1287,6 +1382,12 @@ function rcMet(c){
 }
 /* estado de un recibo: s = ok | dif | pend, adm = lo que dice administración */
 function rcEst(c){
+  const e = rcEst0(c); if(!(Number(c.dc) > 0) || c.est === "anulado") return e;
+  if(c.dce === "rechazado") return { s:"dif", adm:cbDcTxt(c) + ". " + e.adm };
+  if(c.dce === "por aprobar") return { s:e.s === "ok" ? "pend" : e.s, adm:"Descuento de " + c.dc + " % por aprobar por administración. " + e.adm };
+  return e;
+}
+function rcEst0(c){
   if(c.ad && c.est !== "confirmado") return { s:"pend", adm:"Administración lo está registrando en Holded" };
   if(c.est === "confirmado" && c.ad && !c.dif) return { s:"ok", adm:"Registrado por administración" + (c.cr && c.cr !== "sin pago en Holded" ? " · Holded: " + c.cr : "") };
   if(c.est === "confirmado") return c.dif ? { s:"dif", adm:c.dif } : { s:"ok", adm:c.cr && c.cr !== "sin pago en Holded" ? "Holded: " + c.cr : c.cr === "sin pago en Holded" ? "Era solo IVA: no se registra en Holded" : "Registrado en Holded" };
@@ -1408,7 +1509,7 @@ async function rcAvisar(id){
 /* ---------- ADMIN › Cobros (parte 3): por registrar en Holded, con diferencia, por anotar en carpeta y cobro de administración (A-) ----------
    Datos: a=adcob (el receptor concilia al momento con Holded). Registrar = a=adreg (el receptor escribe el pago en Holded, uno por cuenta).
    El cobro de administración reutiliza el formulario del vendedor (lector de capturas incluido) con la nota en CB.adNota. */
-AD.cb = { d:null, err:"", t:0, cargando:false, sub:"reg", conf:"", busy:"", msg:[], pick:false, q:"", sigue:{}, anular:"", hechos:{} };
+AD.cb = { d:null, err:"", t:0, cargando:false, sub:"reg", conf:"", busy:"", msg:[], pick:false, q:"", sigue:{}, anular:"", hechos:{}, dcp:{} };
 const admCobRegs = d => (d.cob || []).filter(c => c.est === "cobrado" || (c.est === "revisar" && (/^Lleva/.test(c.obs || "") || (c.reg || []).length)));
 const admCobDifs = d => (d.cob || []).filter(c => admCobRegs(d).indexOf(c) < 0);
 /* los cobros de un mismo pago (varias notas) se ven como UNA tarjeta por registrar */
@@ -1466,6 +1567,35 @@ function admParteTxt(c, p){
   if(p.k !== "bs" || c.tb !== "b") return "";
   const bcv = r2((Number(c.bs) || 0) - (Number(c.iv) || 0)); return bcv > 0 && Math.abs(bcv * FBCV() - p.m) < 0.05 ? " (" + money(bcv) + " BCV × " + cbCom(FBCV(), 2) + ")" : "";
 }
+/* ---- ADMIN: nota del vendedor y descuento de contado (23 nov 2026) ---- */
+const admNvHtml = c => c.nv ? `<div class="nvbox" role="note"><span class="nvi" aria-hidden="true">💬</span><div><b>Nota de ${esc(admVenTxt(c.ven))}</b><p>${esc(c.nv)}</p></div></div>` : "";
+/* el % que hace que la nota quede saldada con lo que entra (lo de este cobro + los otros cobros por registrar de la misma nota) */
+function admDcCuadre(c, d){
+  const suma = r2((c.partes || []).filter(p => (c.reg || []).indexOf(p.k) < 0).reduce((s, p) => s + p.m, 0)), otros = r2(((d && d.cob) || []).filter(o => o.n === c.n && o.id !== c.id && (o.est === "cobrado" || o.est === "revisar")).reduce((s, o) => s + (Number(o.ab) || 0), 0));
+  return c.npen != null && c.nbase > 0 ? contadoCuadre(c.npen, r2(suma + otros), c.nbase) : null;
+}
+const admDcBot = (c, dis) => `<div class="adbt"><button class="ghost" data-ad="dcno" data-id="${esc(c.id)}"${dis}>Rechazar</button><button class="send dk" data-ad="dcap" data-id="${esc(c.id)}"${dis}>APROBAR</button></div>`;
+function admDcHtml(c){
+  const dis = AD.cb.busy === c.id ? " disabled" : "", d = AD.cb.d, v = (AD.cb.dcp || {})[c.id] || "";
+  if(c.dc > 0 && c.dce === "por aprobar") return `<div class="dcb pa"><b>Descuento de contado ${c.dc} % (−${money(c.dcm)}) por aprobar</b><span>${esc(admVenTxt(c.ven))} lo pidió y el pago cae en el día hábil ${c.dh != null ? c.dh : "?"} (el límite es ${DCL}). La nota quedaría en ${money(r2((c.nbase || 0) - c.dcm))}. No se puede registrar hasta que lo decidas.</span>
+    <div class="dcr"><label><span>Aprobar con otro %</span><input class="fld num" data-ad-dcp="${esc(c.id)}" type="text" inputmode="decimal" placeholder="${esc(String(c.dc).replace(".", ","))}" value="${esc(v)}"></label></div>${admDcBot(c, dis)}</div>`;
+  if(c.dc > 0 && (c.dce === "automático" || c.dce === "aprobado")) return `<div class="dcb ok"><b>Descuento de contado ${c.dc} % (−${money(c.dcm)}) ${c.dce === "aprobado" ? "aprobado" : "aplicado solo"}</b><span>${c.dce === "automático" ? esc(admVenTxt(c.ven)) + " lo marcó y el pago cae en el día hábil " + (c.dh != null ? c.dh : "?") + " de " + DCL + ". " : ""}Al registrar se pone en Holded: la nota queda en ${money(r2((c.nbase || 0) - c.dcm))}.</span>
+    <div class="adbt"><button class="ghost" data-ad="dcno" data-id="${esc(c.id)}"${dis}>Quitar el descuento</button></div></div>`;
+  if(c.tb === "b" || c.fa || c.gr || !(c.nbase > 0) || c.nd > 0 || c.npen == null) return c.dce === "rechazado" ? `<div class="dcb"><b>Descuento de ${c.dc} % rechazado</b><span>La nota seguirá debiendo la diferencia.</span></div>` : "";
+  const cu = admDcCuadre(c, d);
+  return `<div class="dcb"><b>${c.dce === "rechazado" ? "Descuento rechazado: puedes ponerlo tú" : "Descuento de contado"}</b><span>Para que la nota quede saldada con lo que entró.</span>
+    <div class="dcr"><button class="mini" data-ad="dcpon" data-id="${esc(c.id)}" data-p="${esc(String(DCP))}"${dis}>${esc(String(DCP).replace(".", ","))} %</button>${cu > 0 ? `<button class="mini" data-ad="dcpon" data-id="${esc(c.id)}" data-p="${cu}"${dis}>Que cuadre · ${esc(String(cu).replace(".", ","))} %</button>` : ""}
+      <label><span>Otro %</span><input class="fld num" data-ad-dcp="${esc(c.id)}" type="text" inputmode="decimal" value="${esc(v)}"></label><button class="mini" data-ad="dcotro" data-id="${esc(c.id)}"${dis}>Poner</button></div></div>`;
+}
+/* cobro confirmado cuyo descuento falta ponerlo en Holded (dcf 1) o decidirlo (dcf 2): va en «Con diferencia» */
+function admDcfCard(c){
+  const dis = AD.cb.busy === c.id ? " disabled" : "";
+  return `<div class="adw"><span class="rct dif">${c.dcf === 2 ? "DESCUENTO POR DECIDIR" : "DESCUENTO POR PONER EN HOLDED"}</span><article class="rcc adc">${admCobCab(c)}${admNvHtml(c)}
+    ${c.dcf === 2 ? `<div class="dcb pa"><b>Descuento de contado ${c.dc} % (−${money(c.dcm)}) por aprobar</b><span>El pago ya está en Holded. ${esc(admVenTxt(c.ven))} pidió el descuento al día hábil ${c.dh != null ? c.dh : "?"} (el límite es ${DCL}).</span>
+      <div class="dcr"><label><span>Aprobar con otro %</span><input class="fld num" data-ad-dcp="${esc(c.id)}" type="text" inputmode="decimal" placeholder="${esc(String(c.dc).replace(".", ","))}" value="${esc((AD.cb.dcp || {})[c.id] || "")}"></label></div>${admDcBot(c, dis)}</div>`
+    : `<div class="dcb ok"><b>Descuento de contado ${c.dc} % (−${money(c.dcm)}) aceptado</b><span>El pago ya está en Holded, pero la nota aún no tiene el descuento: le quedan ${money(c.npen != null ? c.npen : 0)} pendientes.</span>
+      <div class="adbt"><button class="send dk" data-ad="dcholded" data-id="${esc(c.id)}"${dis}>PONER ${esc(String(c.dc).replace(".", ","))} % EN HOLDED</button></div></div>`}</article></div>`;
+}
 function admRegCard(c){
   const conf = AD.cb.conf === c.id, busy = AD.cb.busy === c.id, hechas = c.reg || [], partes = c.partes || [], falta = partes.filter(p => hechas.indexOf(p.k) < 0);
   const soloEf = partes.length === 1 && partes[0].k === "ef", suma = r2(falta.reduce((s, p) => s + p.m, 0)), ret = (AD.ret || []).find(r => r.n === c.n);
@@ -1473,17 +1603,18 @@ function admRegCard(c){
   if(c.est === "revisar" && c.obs) av.unshift(c.obs);
   if(c.tb === "b" && !(c.nd > 0) && c.npen != null) av.push("La nota aún no tiene el " + DBCV + " % en Holded: quedará un saldo hasta que se lo pongas.");
   if(c.npen != null && suma > c.npen + 0.5) av.push("En Holded la nota solo tiene " + money(c.npen) + " pendientes.");
-  let h = `<div class="adw"><span class="rct pc">${esc(admMetTab(c))}</span><article class="rcc adc">${admCobCab(c)}
+  let h = `<div class="adw"><span class="rct pc">${esc(admMetTab(c))}</span><article class="rcc adc">${admCobCab(c)}${admNvHtml(c)}
     <span class="adm">${cbMetHtml(c, true)}${c.rf ? `<span class="mtx">ref. ${esc(c.rf)}</span>` : ""}</span>
     <div class="adbx">${partes.map(p => `<span class="mtl">${mtChip(p.k)}${hechas.indexOf(p.k) >= 0 ? "Ya está en Holded" : "Va a la nota"}</span><b class="num">${money(p.m)}</b><small>en ${esc(p.cta)}${esc(admParteTxt(c, p))}</small>`).join("")}
       ${Number(c.iv) > 0 ? `<span>IVA cobrado (no va a Holded)</span><b class="num">${cbM(Number(c.iv), { tar:c.tb === "b" ? "b" : "u" })}</b>` : ""}
       ${c.fa && ret && ret.rt > 0 ? `<small class="adret">Retuvo ${ret.rt} % · ${ret.rec ? "comprobante recibido" : "comprobante pendiente"}</small>` : ""}
       <small>Fecha del pago en Holded: ${esc(cbFecha2(c.fh || ""))}</small></div>
-    ${av.map(a => `<div class="msg">${esc(a)}</div>`).join("")}`;
+    ${av.map(a => `<div class="msg">${esc(a)}</div>`).join("")}${admDcHtml(c)}`;
+  const dcPa = c.dc > 0 && c.dce === "por aprobar";
   if(busy) h += `<button class="send" disabled>REGISTRANDO EN HOLDED…</button>`;
-  else if(conf) h += `<div class="adcf"><b>¿Registrar en Holded?</b><span>${falta.map(p => money(p.m) + " en " + esc(p.cta)).join(" + ")} · ${esc(cbFecha2(c.fh || ""))}</span>
+  else if(conf) h += `<div class="adcf"><b>¿Registrar en Holded?</b><span>${c.dc > 0 && (c.dce === "automático" || c.dce === "aprobado") && !c.dch ? "Poner " + c.dc + " % de descuento en la nota y registrar " : ""}${falta.map(p => money(p.m) + " en " + esc(p.cta)).join(" + ")} · ${esc(cbFecha2(c.fh || ""))}</span>
       <div class="adbt"><button class="ghost" data-ad="cbno">Cancelar</button><button class="send" data-ad="cbsi" data-id="${esc(c.id)}">SÍ, REGISTRAR</button></div></div>`;
-  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="send dk" data-ad="cbreg" data-id="${esc(c.id)}">${soloEf ? "RECIBÍ EL EFECTIVO · REGISTRAR" : hechas.length ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED"}</button></div>`;
+  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="send dk" data-ad="cbreg" data-id="${esc(c.id)}"${dcPa ? " disabled" : ""}>${soloEf ? "RECIBÍ EL EFECTIVO · REGISTRAR" : hechas.length ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED"}</button></div>`;
   return h + `</article></div>`;
 }
 /* un pago que cubre varias notas: UNA tarjeta; al registrar se anota un pago por cuenta y por nota (cada nota con su monto) */
@@ -1527,6 +1658,7 @@ async function admRegGrupoAcc(c){
   await admCobCarga(true); admRender();
 }
 function admDifCard(c){
+  if(c.dcf) return admDcfCard(c);
   const m = /^Holded: (.*) · tu recibo: (.*)$/.exec(c.dif || ""), arch = /archivada/.test(c.dif || ""), rev = c.est === "revisar", sig = AD.cb.sigue[c.id], an = AD.cb.anular === c.id;
   const hold = (c.pg || []).reduce((s, p) => s + (Number(p[1]) || 0), 0), coincide = c.est === "confirmado" && hold && Math.abs(hold - c.ab) < 0.06;
   let h = `<div class="adw"><span class="rct dif">${rev ? "MONTO DISTINTO" : arch ? "CUENTA ARCHIVADA" : "CUENTA DISTINTA"}</span><article class="rcc adc">${admCobCab(c)}`;
@@ -1644,6 +1776,11 @@ $("vCob").addEventListener("click", e => {
       else if(g.ya) admToast(g.msg || "Ya estaba en Holded");
       else if(g.alto) AD.cb.msg.push(g.msg); }); }
   else if(k === "cbcap") admVerCap(id);
+  else if(k === "dcap"){ const p = (AD.cb.dcp || {})[id]; admCobAccion("adrev", Object.assign({ id, e:"dcaprobar" }, p ? { p } : {}), () => admToast("Descuento aprobado")); }
+  else if(k === "dcno") admCobAccion("adrev", { id, e:"dcrechazar" }, () => admToast("Descuento quitado: la nota seguirá debiendo la diferencia"));
+  else if(k === "dcpon") admCobAccion("adrev", { id, e:"dcpon", p:a.dataset.p }, () => admToast("Descuento puesto: ya puedes registrar"));
+  else if(k === "dcotro"){ const p = (AD.cb.dcp || {})[id]; if(p) admCobAccion("adrev", { id, e:"dcpon", p }, () => admToast("Descuento puesto: ya puedes registrar")); else { AD.cb.msg.push("Escribe el porcentaje en «Otro %»."); admRender(); } }
+  else if(k === "dcholded") admCobAccion("adrev", { id, e:"dcholded" }, r => admToast(r.msg || "Descuento puesto en Holded"));
   else if(k === "cbrev") admCobAccion("adrev", { id, e:"revisar" }, r => { if(r.sigue) AD.cb.sigue[id] = 1; else { delete AD.cb.sigue[id]; admToast("Corregido: ya coincide"); } });
   else if(k === "cbacep") admCobAccion("adrev", { id, e:"aceptar" }, () => { delete AD.cb.sigue[id]; admToast("Se queda así"); });
   else if(k === "cbconf") admCobAccion("adrev", { id, e:"confirmar" }, () => admToast("Confirmado"));
@@ -1657,7 +1794,8 @@ $("vCob").addEventListener("click", e => {
   else if(k === "carn"){ const ps = ((d && d.car) || []).filter(p => p.n === id && !AD.cb.hechos[p.p]); if(ps.length) admCarHecho(ps, ps[0].nn + " anotada"); }
   else if(k === "carv"){ const ps = ((d && d.car) || []).filter(p => p.ven === a.dataset.k && !AD.cb.hechos[p.p]); if(ps.length) admCarHecho(ps, "Carpeta " + admVenTxt(a.dataset.k) + " al día"); }
 });
-$("vCob").addEventListener("input", e => { if(e.target.id === "admQ"){ AD.cb.q = e.target.value; const L = $("admPk"); if(L) L.innerHTML = admPicker(); } });
+$("vCob").addEventListener("input", e => { if(e.target.id === "admQ"){ AD.cb.q = e.target.value; const L = $("admPk"); if(L) L.innerHTML = admPicker(); }
+  if(e.target.dataset && e.target.dataset.adDcp){ (AD.cb.dcp = AD.cb.dcp || {})[e.target.dataset.adDcp] = e.target.value; } });   // «Otro %» del descuento: se guarda sin redibujar para no perder el foco
 
 /* ---------- eventos ---------- */
 $("vCob").addEventListener("click", async e => {
@@ -1684,6 +1822,7 @@ $("vCob").addEventListener("click", async e => {
   else if(k === "multiauto"){ if(CB.multi){ CB.multi.man = false; CB.multi.ap = []; cobRender(); } }
   else if(k === "multiguarda") cbMultiGuarda();
   else if(k === "capsel"){ const f = $("cbCapF"); if(f) f.click(); }
+  else if(k === "dcon"){ CB.f.dc = a.checked ? String(DCP).replace(".", ",") : ""; cobRender(); const i = $("cb_dc"); if(i) i.focus(); }
   else if(k === "mpon"){ CB.mpOn = true; cobRender(); }
   else if(k === "mon"){ const f = a.dataset.k; CB.on[f] = true; cobRender(); const i = $("cb_" + f); if(i) i.focus(); }
   else if(k === "moff"){ const f = a.dataset.k; CB.on[f] = false; CB.f[f] = ""; if(f === "mp") CB.mpOn = false; if(f === "bs"){ CB.f.bsb = ""; CB.bsOn = false; } cobRender(); }
@@ -1709,7 +1848,7 @@ $("vCob").addEventListener("click", async e => {
   else if(k === "edit"){
     const c = cbCobros().find(x => x.id === a.dataset.id); if(!c) return; const m = v => v ? String(v).replace(".", ",") : "";
     CB.nota = c.n; CB.edit = c.id; CB.del = null; CB.err = ""; cbCapLimpia(); CB.mpOn = Number(c.mp) > 0; CB.bsOn = Number(c.bsb) > 0; CB.tbMan = Number(c.tbc) > 0;
-    CB.f = { ef:m(c.ef), us:m(c.us), ze:m(c.ze), mp:m(c.mp), bs:m(c.bs), bsb:m(c.bsb), tb:Number(c.tbc) > 0 ? cbCom(Number(c.tbc), 4) : "", ta:m(c.ta), fp:c.fp || "", rf:c.rf || "", dd:Number(c.dd) > 0 ? m(c.dd) : "" }; cobRender(); top();
+    CB.f = { ef:m(c.ef), us:m(c.us), ze:m(c.ze), mp:m(c.mp), bs:m(c.bs), bsb:m(c.bsb), tb:Number(c.tbc) > 0 ? cbCom(Number(c.tbc), 4) : "", ta:m(c.ta), fp:c.fp || "", rf:c.rf || "", dd:Number(c.dd) > 0 ? m(c.dd) : "", dc:cbDcCont(c) ? m(c.dc) : "", nv:c.nv || "" }; cobRender(); top();
   }
   else if(k === "editx"){ CB.edit = null; CB.f = cbF0(); CB.err = ""; cobRender(); }
   else if(k === "avok"){ CB.avisos.splice(Number(a.dataset.i), 1); cobRender(); }

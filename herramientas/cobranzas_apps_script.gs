@@ -97,7 +97,7 @@ function vendedorDe(q) {
 }
 function cobroNuevo(tag, q) {
   var c, b64 = String(q.x || "");   // el cobro llega en "x": Google reserva los nombres "c" y "sid" y rechaza la petición si se usan
-  if (!/^[A-Za-z0-9_-]{20,3000}$/.test(b64)) return { estado: "error", msg: "Cobro incompleto" };
+  if (!/^[A-Za-z0-9_-]{20,4500}$/.test(b64)) return { estado: "error", msg: "Cobro incompleto" };
   while (b64.length % 4) b64 += "=";
   try { c = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(b64)).getDataAsString("UTF-8")); } catch (e) { return { estado: "error", msg: "No se pudo leer el cobro" }; }
   var num = function (x) { x = Math.round((Number(x) || 0) * 100) / 100; return x > 0 && x < 1e6 ? x : 0; };
