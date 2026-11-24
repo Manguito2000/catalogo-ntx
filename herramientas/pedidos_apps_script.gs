@@ -25,7 +25,7 @@ var PD_FICHAS = {                 // sha256 de la ficha k de cada vendedor -> ta
   "a3e63689548907d267d597ff81a78e7108c3c1a1951dd278de6065d53bd7e675": "rm",
   "48c7e8edfbaa2ce4928186312b11144fcff1bd198df9fef2cfaf5efef7cbf09d": "natasha",
   "9e3e47b609989a4926558c836c6bcbaf2dc247393770f4ea00fb28cf09d3495b": "nersi",
-  "62319bf991661524d9ac33a5fb466e240f646210b8713bda5398617845f369c5": "randy"
+  "62319bf991661524d9ac33a5fb466e240f646210b8713bda5398617845f369c5": "randy", "95c14b7315e9da132bb239421c0f3399b5f61c13a3fe8d5388e4484dd77d0dff": "julian"
 };
 var PD = {
   nuevo: "6af59ce1fe2e564cd90b25b4",       // contacto CLIENTE NUEVO
@@ -149,7 +149,7 @@ function pdValidar(o, idx, cont, tag, vend, ahora) {
   if (err.length) return { ok: false, obs: err.join("; ") };
   var partes = ["Pedido desde Pedidos NTX", "Vendedor: " + (vend || tag)];
   if (o.tarifa === "bcv") partes.push("TARIFA BCV");
-  if (o.contado) partes.push("Pago de contado " + desc + "%"); else if (desc > 0) partes.push("Descuento " + desc + "%");
+  if (desc > 0 && !/cr[eé]dito/i.test(o.nota)) o.contado = true; if (o.contado) partes.push("Pago de contado " + desc + "%"); else if (desc > 0) partes.push("Descuento " + desc + "%");
   if (nuevo) partes.push("CLIENTE NUEVO: " + o.cn + " (falta crear su ficha: RIF y teléfono llegan por WhatsApp)");
   if (o.nota) partes.push("Nota: " + o.nota);
   partes.push("Ref " + o.id);
@@ -340,8 +340,8 @@ function pdEvaluar(n, origen, org, desde, hermanas, env, skus, ahora) {
   // b) vencimiento: 30 días; 3 si el pedido era de contado
   var notes = String(origen.notes || ""), portal = /Pedido desde Pedidos NTX/.test(notes);
   var dO = (linO.map(function (p) { return Number(p.discount) || 0; }));
-  var contado = portal ? /Pago de contado/i.test(notes) : (Number(origen.discount) === 15 || (dO.length > 0 && dO.every(function (x) { return x === 15; })));
-  if (origen.dueDate && Number(origen.dueDate) - Number(origen.date) >= 20 * 86400 && org.tipo === "salesorder") contado = false;
+  var hayDesc = (Number(origen.discount) || 0) > 0 || dO.some(function (x) { return x > 0; }); var contado = /Pago de contado/i.test(notes) || (hayDesc && !/cr[eé]dito/i.test(notes + " " + String(origen.desc || "")));
+  if (!hayDesc && origen.dueDate && Number(origen.dueDate) - Number(origen.date) >= 20 * 86400 && org.tipo === "salesorder") contado = false;
   var dias = contado ? PD.contado : PD.credito, actual = Math.round(((Number(n.dueDate) || Number(n.date)) - Number(n.date)) / 86400);
   var pagada = (Number(n.paymentsPending) || 0) <= 0.01;
   var venc = { dias: dias, actual: actual, fix: null, txt: "ok (" + actual + " días)" };
@@ -426,7 +426,7 @@ function pdBandeja(q) {
     var pt = portalPor[x.id], notes = String(x.notes || "");
     return { id: x.id, num: x.docNumber, tipo: tipo, fecha: Number(x.date), cliente: x.contactName, clienteId: x.contact, vend: pdVendDoc(x, pt), nombreNuevo: pdNombreNuevo(x),
       total: Math.round(Number(x.total) * 100) / 100, tarifa: /TARIFA BCV/.test(notes) ? "bcv" : /Pedido desde Pedidos NTX/.test(notes) ? "usd" : "",
-      contado: /Pago de contado/i.test(notes), desc: Number(x.discount) || Math.max.apply(null, [0].concat((x.products || []).map(function (p) { return Number(p.discount) || 0; }))),
+      contado: /Pago de contado/i.test(notes) || (/Descuento \d/.test(notes) && !/cr[eé]dito/i.test(notes)), desc: Number(x.discount) || Math.max.apply(null, [0].concat((x.products || []).map(function (p) { return Number(p.discount) || 0; }))),
       vence: x.dueDate ? Math.round((Number(x.dueDate) - Number(x.date)) / 86400) : 0, nota: pdNotaVendedor(x), nuevo: x.contact === PD.nuevo,
       portal: !!pt || /Pedido desde Pedidos NTX/.test(notes), lineas: (x.products || []).map(function (p) { return [pdSku(p), Number(p.units) || 0, Number(p.price) || 0, Number(p.discount) || 0]; }),
       dias: Math.floor((ahora - Number(x.date)) / 86400) };
