@@ -929,6 +929,15 @@ function esAjuste(bankId) { if (AJ_ID === null) { try { AJ_ID = cuentaAjusteId()
 /* Deja la nota en $0,00 con un pago en «Ajustes por redondeo». nota = la nota ya leída (opcional). Devuelve { ok, m (monto del ajuste), msg }. */
 function cuadrarNota(nid, recibo, vendedor, nota) {
   nid = String(nid || "").replace(/[^a-f0-9]/g, ""); if (nid.length !== 24) return { ok: false, msg: "Nota no válida" };
+  if (!recibo) {                                                                          // nota ya pagada que quedó con centavos: si cabe, la nota se lleva a lo pagado
+    var n0 = nota || holded("documents/invoice/" + nid), p0 = adRd(n0.paymentsPending);
+    if (lineaPuede(n0, -p0)) {
+      var ln = lineaRedondeo(nid, n0, -p0); if (!ln.ok) return { ok: false, msg: ln.msg };
+      try { fcHoja("Ajustes", AJ_COLS).appendRow([fecha(new Date().toISOString()), String(n0.docNumber || ""), String(n0.contactName || ""), -p0, "", "administración · línea en la nota", Math.floor(Date.now() / 1000), nid]); } catch (e3) {}
+      return { ok: true, m: -p0, linea: true, msg: ln.msg };
+    }
+    nota = n0;
+  }
   var aj = cuentaAjusteId(); if (!aj) return { ok: false, msg: "No cuadré los decimales: crea en Holded la cuenta de tesorería «" + CUENTA_AJUSTE + "» y vuelve a intentar." };
   nota = nota || holded("documents/invoice/" + nid);
   var m = adRd(nota.paymentsPending), num = String(nota.docNumber || "");
@@ -940,6 +949,42 @@ function cuadrarNota(nid, recibo, vendedor, nota) {
   try { var cache = CacheService.getScriptCache(); cache.remove("COB_TODAS"); cache.remove("COB_NT"); } catch (e) {}
   try { fcHoja("Ajustes", AJ_COLS).appendRow([fecha(new Date().toISOString()), num, String(nota.contactName || ""), m, recibo || "", vendedor || "administración", Math.floor(Date.now() / 1000), nid]); } catch (e2) {}
   return { ok: true, m: m, msg: "decimales cuadrados (" + (m > 0 ? "+" : "−") + "$" + Math.abs(m).toFixed(2).replace(".", ",") + " en " + CUENTA_AJUSTE + ")" };
+}
+/* ---------- línea «Ajuste por redondeo» (24 nov 2026, probado en vivo en NE4265: $191,82 → $192,00) ----------
+   Hasta AJ_LINEA_MAX de diferencia, la NOTA se lleva al monto cobrado con una línea sin producto (sin IVA ni stock) y el pago entra completo a su
+   cuenta: sin nota de crédito ni débito y sin pago en la cuenta de ajustes. Holded REEMPLAZA todas las líneas en un PUT con items: se mandan las de
+   la nota tal cual (producto, variante, cuenta, precio, descuento) más la del ajuste, y se relee: si algo cambió, se vuelve a dejar como estaba.
+   Holded redondea cada línea a centavos antes de sumar: el ajuste se calcula contra el total que muestra Holded, no contra la suma exacta.
+   Solo notas sin descuento general (las BCV con su descuento y las de descuento de contado van a la cuenta de ajustes). */
+var AJ_LINEA = "Ajuste por redondeo", AJ_LINEA_MAX = 3;
+function itemDe(l) {
+  return { name: l.name, desc: l.desc || "", units: l.units, subtotal: l.price, discount: l.discount || 0, tax: l.tax || 0, taxes: l.taxes || [], sku: l.sku || "",
+    productId: l.productId || null, variantId: l.variantId || null, account: l.account || null, accountingAccountId: l.account || null, costPrice: l.costPrice || 0, tags: l.tags || [] };
+}
+function lineaPuede(nota, dif) { return Math.abs(dif) >= 0.01 && Math.abs(dif) <= AJ_LINEA_MAX + 0.001 && !(Number(nota.discount) > 0); }
+/* Lleva el total de la nota a total + dif con la línea de ajuste (si ya tiene una, la suma ahí). Devuelve { ok, nota (releída), msg }. */
+function lineaRedondeo(nid, nota, dif) {
+  var num = String(nota.docNumber || ""), L = nota.products || [], prev = 0, base = [];
+  L.forEach(function (l) { if (!l.productId && String(l.name || "") === AJ_LINEA) prev = adRd(prev + Number(l.price) * (Number(l.units) || 1)); else base.push(l); });
+  var aj = adRd(prev + dif), meta = adRd(Number(nota.total) + dif), items = base.map(itemDe);
+  if (Math.abs(aj) >= 0.01) items.push({ name: AJ_LINEA, desc: "Cuadre al monto cobrado", units: 1, subtotal: aj, discount: 0, tax: 0, taxes: [] });
+  var cuerpo = function (its) { return { items: its, discount: Number(nota.discount) || 0, tags: (nota.tags || []).slice() }; };
+  var r = cobHttp("put", "documents/invoice/" + nid, cuerpo(items));
+  if (!((r.codigo === 200 || r.codigo === 201) && !(r.datos && r.datos.status === 0)))
+    return { ok: false, msg: "Holded no aceptó la línea de ajuste en la nota " + num + (r.datos && r.datos.info ? " (" + r.datos.info + ")" : " (respuesta " + r.codigo + ")") + ". No se registró nada." };
+  try { var cache = CacheService.getScriptCache(); cache.remove("COB_TODAS"); cache.remove("COB_NT"); } catch (e) {}
+  var n2 = holded("documents/invoice/" + nid), mal = [], L2 = n2.products || [], K = ["name", "desc", "price", "units", "discount", "tax", "sku", "productId", "variantId", "account"];
+  if (L2.length !== items.length) mal.push("quedaron " + L2.length + " líneas (se esperaban " + items.length + ")");
+  else base.forEach(function (a, i) { var b = L2[i]; K.forEach(function (k) { if (String(a[k] == null ? "" : a[k]) !== String(b[k] == null ? "" : b[k])) mal.push(String(a.name) + ": cambió " + k); }); });
+  if (Math.abs(Number(n2.total) - meta) > 0.005) mal.push("el total quedó en $" + Number(n2.total).toFixed(2) + " (se esperaba $" + meta.toFixed(2) + ")");
+  ["contact", "docNumber", "date", "currency"].forEach(function (k) { if (String(n2[k]) !== String(nota[k])) mal.push("cambió " + k); });
+  if ((n2.tags || []).slice().sort().join(",") !== (nota.tags || []).slice().sort().join(",")) mal.push("cambiaron las etiquetas");
+  if (Math.abs((Number(n2.discount) || 0) - (Number(nota.discount) || 0)) > 0.009) mal.push("cambió el descuento");
+  if (!mal.length) return { ok: true, nota: n2, aj: dif, msg: "nota " + num + " llevada a $" + meta.toFixed(2).replace(".", ",") + " (línea «" + AJ_LINEA + "» " + (dif > 0 ? "+" : "−") + "$" + Math.abs(dif).toFixed(2).replace(".", ",") + ")" };
+  var rv = cobHttp("put", "documents/invoice/" + nid, cuerpo(L.map(itemDe))), n3 = null; try { n3 = holded("documents/invoice/" + nid); } catch (e2) {}
+  var vuelta = rv.codigo === 200 && n3 && Math.abs(Number(n3.total) - Number(nota.total)) < 0.005 && (n3.products || []).length === L.length;
+  aviso("revisar la nota " + num, "Al poner la línea de ajuste en la nota " + num + ": " + mal.join("; ") + ". " + (vuelta ? "Se dejó como estaba." : "NO se pudo dejar como estaba: revísala en Holded YA.") + " No se registró el pago.");
+  return { ok: false, msg: "Al poner la línea de ajuste en la nota " + num + ": " + mal.join("; ") + ". " + (vuelta ? "La nota quedó como estaba" : "No pude dejar la nota como estaba: revísala en Holded") + " y no se registró el pago." };
 }
 var AJ_COLS = ["Fecha", "Nota", "Cliente", "Ajuste $", "Recibo", "Vendedor", "ts", "notaId"];
 function fechaHolded(f) { return f.fp || Utilities.formatDate(new Date(f.ts * 1000), "America/Caracas", "yyyy-MM-dd"); }
@@ -1007,6 +1052,16 @@ function registrarFila(hoja, filas, f, cuadrar) {
   var faltan = partes.filter(function (p) { return hechas.indexOf(p.k) < 0; }), porPagar = adRd(faltan.reduce(function (s, p) { return s + p.m; }, 0)), pend = Number(nota.paymentsPending) || 0;
   if (!partes.length) throw new Error("Este cobro no tiene montos para registrar en Holded.");
   if (porPagar > pend + 0.5 && !cuadrar) return { alto: true, msg: "En Holded la nota " + f.nota + " solo tiene $" + pend.toFixed(2) + " pendientes y este cobro registra $" + porPagar.toFixed(2) + ". Revisa la nota en Holded." };
+  var linea = null;                                                                       // decimales hasta $3 en una nota sin descuento: la nota se lleva al monto cobrado
+  if (cuadrar && !filas.some(function (x) { return x.notaId === f.notaId && x.uid !== f.uid && (x.estado === "cobrado" || x.estado === "revisar"); })) {
+    var difL = adRd(porPagar - pend);
+    if (lineaPuede(nota, difL)) {
+      linea = lineaRedondeo(f.notaId, nota, difL); if (!linea.ok) return { alto: true, msg: linea.msg };
+      nota = linea.nota; pend = Number(nota.paymentsPending) || 0;
+      escribir(hoja, f.fila, { "Ajuste redondeo $": difL }); f.aj = difL;   // en la hoja «Ajustes» dice que fue con línea en la nota
+      try { fcHoja("Ajustes", AJ_COLS).appendRow([fecha(new Date().toISOString()), f.nota, f.cliente, difL, f.recibo, f.vendedor + " · línea en la nota", Math.floor(Date.now() / 1000), f.notaId]); } catch (e8) {}
+    }
+  }
   var desc = ("Recibo " + f.recibo + " · " + f.vendedor + (f.gn ? " · " + f.gn : "") + (f.ref ? " · ref. " + f.ref : "")).slice(0, 140);   // pago para varias notas: la misma referencia en cada nota
   for (var i = 0; i < faltan.length; i++) {
     var p = faltan[i], r = cobHttp("post", "documents/invoice/" + f.notaId + "/pay", { date: tsHolded(fechaParte(f, p.k)), amount: p.m, treasury: CUENTA_ID[p.cta], desc: desc });
@@ -1028,7 +1083,8 @@ function registrarFila(hoja, filas, f, cuadrar) {
   var out = { ok: true, msg: partes.map(function (x) { return "$" + x.m.toFixed(2).replace(".", ",") + " en " + x.cta; }).join(" + "), pend: Number(nota2.paymentsPending) || 0 }, av = [];
   if (!mios.completo) av.push("Holded aceptó el pago pero no lo encontré al releer la nota " + f.nota + ". Revísala en Holded.");
   if (f.tarifa === "BCV" && !(Number(nota2.discount) > 0) && out.pend >= 0.01) av.push("La nota " + f.nota + " aún no tiene el " + descuentoBcv() + " % en Holded: le quedan $" + out.pend.toFixed(2) + " pendientes hasta que le pongas el descuento.");
-  if (cuadrar) {                                                                           // decimales: la nota queda en $0,00 con un pago en «Ajustes por redondeo»
+  if (linea && linea.ok) out.msg = linea.msg + " · " + out.msg;
+  if (cuadrar && !(linea && linea.ok)) {                                                 // más de $3 (o nota con descuento): la nota queda en $0,00 con un pago en «Ajustes por redondeo»
     var otroPend = filas.filter(function (x) { return x.notaId === f.notaId && x.uid !== f.uid && (x.estado === "cobrado" || x.estado === "revisar"); })[0];
     if (otroPend) av.push("No cuadré los decimales: la nota " + f.nota + " tiene otro cobro por registrar (" + otroPend.recibo + "). Regístralo primero.");
     else if (f.tarifa === "BCV" && !(Number(nota2.discount) > 0)) av.push("No cuadré los decimales: la nota " + f.nota + " es BCV y aún no tiene el descuento en Holded.");

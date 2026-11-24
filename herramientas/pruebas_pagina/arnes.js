@@ -19,7 +19,7 @@ function cargar(extra = {}) {
   };
   ctx.globalThis = ctx; vm.createContext(ctx);
   // las funciones y const de nivel superior quedan en el contexto (const/let no se ven desde fuera: se exportan al final)
-  const nombres = ["CB", "AD", "NT", "esB", "cbNeto", "cbVisible", "cbSaldoNota", "cbDcOk", "cbDcDraft", "cbDcPc", "cbDcCont", "cbDcTxt", "cbCalc", "cbFormHtml", "cbSum", "cobRender", "admRegCard", "admDifCard", "admDcHtml", "admDcCuadre", "rcEst", "cbReciboTxt", "cbCobros", "pendiente", "cbCfgContado", "contadoDecide", "cbDiaTxt", "cbHoy", "cbNotas", "cbGuardar", "cbEnviar", "DCP", "DCL", "DCF", "CENT", "cbRows", "cbCentavos", "cbReparto", "cbSaldoRec", "cbDifTxt", "cbAjAdm", "admAjInfo", "admAjHtml", "admCent", "admRegGrupo", "cbMrEstado"];
+  const nombres = ["CB", "AD", "NT", "esB", "cbNeto", "cbVisible", "cbSaldoNota", "cbDcOk", "cbDcDraft", "cbDcPc", "cbDcCont", "cbDcTxt", "cbCalc", "cbFormHtml", "cbSum", "cobRender", "admRegCard", "admDifCard", "admDcHtml", "admDcCuadre", "rcEst", "cbReciboTxt", "cbCobros", "pendiente", "cbCfgContado", "contadoDecide", "cbDiaTxt", "cbHoy", "cbNotas", "cbGuardar", "cbEnviar", "DCP", "DCL", "DCF", "CENT", "cbRows", "cbCentavos", "cbReparto", "cbSaldoRec", "cbDifTxt", "cbAjAdm", "admAjInfo", "admAjHtml", "admCent", "admRegGrupo", "cbMrEstado", "cbCapSinFecha", "cbFpFalta", "cbFpHtml", "cbCapRecalc"];
   vm.runInContext(SRC + "\n;globalThis.__X = { " + nombres.map(n => n + ": typeof " + n + " !== 'undefined' ? " + n + " : undefined").join(", ") + " , cfg(){ return [DCP, DCL, DCF]; } };", ctx, { filename: "cobranzas_pagina.js" });
   return { ctx, X: ctx.__X, els };
 }

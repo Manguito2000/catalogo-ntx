@@ -26,17 +26,31 @@ const fila = (id, num, total, pagado, extra = []) => [id, num, "c1", 1795215600,
 { const W = cargar(); const c = { id: "u1", rec: "E-0001", ven: "Elías", cn: "ELÍAS ISTANBOULIE", nn: "NE4265", n: "n1", t: 1, nom: 192, ab: 192, ze: 192, est: "cobrado", tb: "", partes: [{ k: "ze", cta: "NUEVO ZELLE", m: 192 }], reg: [], npen: 191.82, nd: 0, fh: "2026-11-24" };
   W.X.AD.cb.d = { cob: [c], aj: 1, ajc: 1 };
   const a = W.X.admAjInfo(c); eq("5 info", [a.dif, a.puede, a.on], [-0.18, true, true]);
-  const h = W.X.admRegCard(c); si("5 casilla", /data-ad="ajt"[^>]*checked/.test(h) && /−\$0,18 en «Ajustes por redondeo»/.test(h)); si("5 sin aviso de tope", !/solo tiene/.test(h));
+  const h = W.X.admRegCard(c); si("5 casilla", /data-ad="ajt"[^>]*checked/.test(h) && /La nota pasa a \$192,00 con una línea «Ajuste por redondeo» de \+\$0,18/.test(h)); eq("5 por línea", W.X.admAjInfo(c).linea, true); si("5 sin aviso de tope", !/solo tiene/.test(h));
   W.X.AD.cb.aj = { u1: false }; eq("5 desmarcada", W.X.admAjInfo(c).on, false);
   W.X.AD.cb.aj = {}; const big = Object.assign({}, c, { npen: 200 }); eq("5 diferencia grande: no se marca sola", [W.X.admAjInfo(big).puede, W.X.admAjInfo(big).on], [true, false]);
   W.X.AD.cb.d = { cob: [c, { id: "u2", n: "n1", est: "cobrado", rec: "E-0002" }], aj: 1 }; const o = W.X.admAjInfo(c); eq("5 con otro cobro no", [o.puede, !!o.otro], [false, true]);
   W.X.AD.cb.d = { cob: [c] }; eq("5 receptor viejo no", W.X.admAjInfo(c).puede, false);
   W.X.AD.cb.d = { cob: [c], aj: 1 }; eq("5 BCV sin descuento no", W.X.admAjInfo(Object.assign({}, c, { tb: "b", nd: 0 })).puede, false);
-  si("5 falta la cuenta", /falta crear esa cuenta/.test(W.X.admRegCard(c))); }
+  si("5 con línea no pide la cuenta", !/falta crear esa cuenta/.test(W.X.admRegCard(c)));
+  const g8 = Object.assign({}, c, { npen: 200 }); W.X.AD.cb.aj = { u1: true }; si("5 más de $3: cuenta", /\$8,00 en la cuenta «Ajustes por redondeo»/.test(W.X.admRegCard(g8)) && /falta crear esa cuenta/.test(W.X.admRegCard(g8))); eq("5 más de $3 sin línea", W.X.admAjInfo(g8).linea, false);
+  eq("5 nota con descuento sin línea", W.X.admAjInfo(Object.assign({}, c, { nd: 15 })).linea, false); }
 // 6) ADMIN: notas con centavos (pagadas, sin cobro por registrar)
 { const W = cargar(); W.X.AD.cb.d = { aj: 1, np: [{ id: "a", num: "NE1", pag: 100, pen: 0.4, tot: 100.4, ven: "Elías", pc: [] }, { id: "b", num: "NE2", pag: 0, pen: 0.4, tot: 0.4, pc: [] }, { id: "c", num: "NE3", pag: 50, pen: 0.4, pc: [["x"]] }, { id: "d", num: "NE4", pag: 50, pen: 3, pc: [] }] };
   eq("6 lista", W.X.admCent(W.X.AD.cb.d).map(n => n.num), ["NE1"]); }
 
+// 8) captura sin fecha: no se usa la de la imagen ni la de hoy; el vendedor la escribe y sin ella no se guarda
+{ const W = cargar(); W.ctx.S.nt = [fila("n1", "NE4265", 191.82, 0)]; W.ctx.S.clientes = []; W.X.CB.cobros = []; W.X.CB.cargado = true; W.X.CB.nota = "n1";
+  W.X.CB.f = { ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"", dc:"", nv:"", aj:"" }; W.X.CB.on = {}; W.X.CB.man = {};
+  W.X.CB.caps = [{ est: "listo", lec: { met: "ze", monto: 192, fecha: "2026-11-23", fechaDe: "imagen", ref: "123456" }, av: [] }];
+  const n = W.X.cbNotas()[0]; W.X.cbCapRecalc(n);
+  eq("8 sin fecha", [W.X.CB.f.fp, W.X.cbCapSinFecha(), W.X.cbFpFalta()], ["", true, true]); si("8 aviso en la captura", /no tiene fecha/.test(W.X.CB.caps[0].av.join(" ")));
+  const h = W.X.cbFormHtml(); si("8 campo de fecha", /id="cb_fpx"/.test(h) && /La captura no tiene fecha/.test(h)); eq("8 no pone hoy", W.X.CB.f.fp, "");
+  W.X.cbSum(); eq("8 no deja guardar", [W.X.CB && W.els.cbGo.disabled, W.els.cbErr.textContent], [true, "La captura no tiene fecha: escribe la fecha del pago."]);
+  W.X.CB.f.fp = "2026-11-21"; W.X.CB.man.fp = true; W.X.cbSum(); eq("8 con fecha", [W.X.cbFpFalta(), W.els.cbGo.disabled], [false, false]);
+  W.X.CB.f.fp = "2099-01-01"; W.X.cbSum(); eq("8 futura", [W.els.cbGo.disabled, W.els.cbErr.textContent], [true, "La fecha del pago no puede ser después de hoy."]);
+  W.X.CB.caps = [{ est: "listo", lec: { met: "ze", monto: 192, fecha: "2026-11-22", fechaDe: "captura", ref: "1" }, av: [] }]; W.X.CB.man = {}; W.X.CB.f.fp = ""; W.X.cbCapRecalc(n);
+  eq("8 con fecha en la captura", [W.X.CB.f.fp, W.X.cbFpFalta(), W.X.cbFpHtml()], ["2026-11-22", false, ""]); }
 // 7) cobro de administración: la casilla se marca sola con centavos; con más de $0,50 hay que marcarla, y entonces se puede pasar
 (async () => {
   const urls = [];

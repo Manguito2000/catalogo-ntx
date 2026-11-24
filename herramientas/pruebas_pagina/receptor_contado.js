@@ -37,6 +37,9 @@ function mundo(opts = {}) {
       else if (r && r[2] && m === "post") { const b = JSON.parse(op.payload), n = H.notas[r[1]]; H.pays.push(b); n.paymentsDetail.push({ id: crypto.randomBytes(12).toString("hex"), amount: b.amount, date: b.date, bankId: b.treasury }); n.paymentsTotal += b.amount; n.paymentsPending = Math.round((n.total - n.paymentsTotal) * 100) / 100; out = { status: 1 }; }
       else if (r && m === "put") { const b = JSON.parse(op.payload), n = H.notas[r[1]]; H.puts.push(b);
         if (opts.putRompe) n.tags = []; else if ("tags" in b) n.tags = b.tags;
+        if (b.items){ n.products = b.items.map((it, i) => ({ name: it.name, desc: it.desc, price: it.subtotal, units: it.units, discount: it.discount || 0, tax: it.tax || 0, sku: it.sku || "", productId: it.productId || null, variantId: it.variantId || null, account: it.account || null }));
+          if (opts.itemsRompe && n.products[0] && !H.rompio){ n.products[0].price += 1; H.rompio = 1; }   // rompe solo el primer PUT
+          n.subtotal = Math.round(n.products.reduce((s, l) => s + Math.round(l.price * l.units * (100 - l.discount)) / 100, 0) * 100) / 100; }
         n.discount = b.discount || 0; n.total = Math.round(n.subtotal * (100 - n.discount)) / 100; n.paymentsPending = Math.round((n.total - n.paymentsTotal) * 100) / 100; out = { status: 1 }; }
       else if (/^contacts\?page=/.test(ruta)) out = /page=1$/.test(ruta) ? Object.entries(H.contactos).map(([id, c]) => ({ id, ...c })) : [];
       else if (ruta === "treasury") out = opts.tesoreria || [];
@@ -52,7 +55,7 @@ function mundo(opts = {}) {
 }
 // nota en Holded: fecha "yyyy-mm-dd" → segundos a medianoche de España (invierno)
 const sec = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 1000 - 3600;
-const nota = (id, num, fechaN, total, extra = {}) => ({ id, docNumber: num, contact: "c1", contactName: "TALLER X", date: sec(fechaN), dueDate: sec(fechaN) + 30 * 86400, subtotal: total, total, discount: 0, paymentsTotal: 0, paymentsPending: total, paymentsDetail: [], tags: ["gabriel"], products: [{ sku: "A" }, { sku: "B" }], ...extra });
+const nota = (id, num, fechaN, total, extra = {}) => ({ id, docNumber: num, contact: "c1", contactName: "TALLER X", date: sec(fechaN), dueDate: sec(fechaN) + 30 * 86400, subtotal: total, total, discount: 0, paymentsTotal: 0, paymentsPending: total, paymentsDetail: [], tags: ["gabriel"], products: [{ name: "A", sku: "A", price: total, units: 1, discount: 0, tax: 0, productId: "p1", variantId: "v1", account: "acc" }, { name: "B", sku: "B", price: 0, units: 1, discount: 0, tax: 0, productId: "p2", variantId: "v2", account: "acc" }], ...extra });
 const x = o => Buffer.from(JSON.stringify(o)).toString("base64url");
 const hoyCcs = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Caracas" }).format(new Date());
 const menosHabiles = (n) => { let d = new Date(hoyCcs + "T12:00:00Z"); let k = 0; while(k < n){ d = new Date(d - 86400000); const w = d.getUTCDay(); if(w && w !== 6 && !CFG.feriados.includes(d.toISOString().slice(0, 10))) k++; } return d.toISOString().slice(0, 10); };
@@ -135,51 +138,67 @@ const V = { cod: "GAB", d: "dispositivo123456" };
   eq("9 carpeta Zelle", car.find(p => p.nn === "NE5001").f, sec(fz)); eq("9 carpeta efectivo", car.find(p => p.nn === "NE5002").f, sec(hoyCcs)); }
 
 // ---------- decimales (24 nov 2026): administración cuadra al registrar ----------
+// Hasta $3 en una nota sin descuento: línea «Ajuste por redondeo» en la nota y el pago entra completo. Más de $3 (o nota con descuento): cuenta «Ajustes por redondeo».
 const AJ = "e".repeat(24), TES = [{ id: AJ, name: "Ajustes por redondeo" }];
-// 10) Pagó de más ($192 por $191,82): Zelle $192 y ajuste −$0,18; la nota queda en $0
+const ult = n => n.products[n.products.length - 1];
+// 10) Pagó de más ($192 por $191,82): la nota pasa a $192 con una línea de +$0,18 y Zelle recibe $192
 { const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4265", menosHabiles(1), 191.82);
   const r = W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000010", n: N1, ze: 192, ab: 192 }) }); eq("10 cobro", r.estado, "ok");
   const v = W.ctx.cobranzas({ a: "adcob", k: "ADM" }); eq("10 receptor sabe", [v.aj, v.ajc], [1, 1]);
-  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000010", aj: "1" });
-  si("10 ok", g.reg.ok); eq("10 pagos", W.H.pays.map(p => [p.amount, p.treasury === AJ]), [[192, false], [-0.18, true]]); eq("10 saldada", W.H.notas[N1].paymentsPending, 0);
-  eq("10 hoja", g.cobro.aj, -0.18); si("10 mensaje", /decimales cuadrados/.test(g.reg.msg)); eq("10 registro de ajustes", W.hojas["Ajustes"].v[1][3], -0.18);
-  const v2 = W.ctx.cobranzas({ a: "adcob", k: "ADM" }); si("10 ajuste fuera de la carpeta", !v2.car.some(p => p.m === -0.18) && v2.car.some(p => p.m === 192)); si("10 ajuste no es pago sin dueño", !v2.arch.length); }
-// 11) Pagó de menos ($191 por $191,82): ajuste +$0,82
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000010", aj: "1" }); const n = W.H.notas[N1];
+  si("10 ok", g.reg.ok); eq("10 un pago", W.H.pays.map(p => [p.amount, p.treasury === AJ]), [[192, false]]); eq("10 nota", [n.total, n.paymentsPending, n.products.length], [192, 0, 3]);
+  eq("10 línea", [ult(n).name, ult(n).price, ult(n).productId], ["Ajuste por redondeo", 0.18, null]); eq("10 líneas intactas", [n.products[0].productId, n.products[0].price, n.products[1].variantId], ["p1", 191.82, "v2"]);
+  eq("10 hoja", g.cobro.aj, 0.18); si("10 mensaje", /llevada a \$192,00/.test(g.reg.msg)); eq("10 registro de ajustes", W.hojas["Ajustes"].v[1][3], 0.18);
+  const v2 = W.ctx.cobranzas({ a: "adcob", k: "ADM" }); si("10 carpeta", v2.car.some(p => p.m === 192)); si("10 sin pagos sin dueño", !v2.arch.length); }
+// 11) Pagó de menos ($191 por $191,82): línea de −$0,82
 { const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4266", menosHabiles(1), 191.82);
   W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000011", n: N1, ef: 191, ab: 191 }) });
-  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000011", aj: "1" });
-  eq("11 pagos", W.H.pays.map(p => p.amount), [191, 0.82]); eq("11 saldada", W.H.notas[N1].paymentsPending, 0); }
+  W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000011", aj: "1" }); const n = W.H.notas[N1];
+  eq("11 pagos", W.H.pays.map(p => p.amount), [191]); eq("11 nota", [n.total, n.paymentsPending, ult(n).price], [191, 0, -0.82]); }
 // 12) Sin cuadrar: se registra lo que entró y la nota queda como Holded la deje
 { const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4267", menosHabiles(1), 191.82);
   W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000012", n: N1, ef: 191, ab: 191 }) });
-  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000012" }); si("12 ok", g.reg.ok); eq("12 un pago", W.H.pays.length, 1); eq("12 quedan", W.H.notas[N1].paymentsPending, 0.82); }
-// 13) Sin la cuenta en Holded: se registra el pago y avisa que falta la cuenta
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000012" }); si("12 ok", g.reg.ok); eq("12 un pago", W.H.pays.length, 1); eq("12 quedan", W.H.notas[N1].paymentsPending, 0.82); eq("12 sin línea", W.H.notas[N1].products.length, 2); }
+// 13) La línea no necesita la cuenta de ajustes; más de $3 sí (y avisa que falta)
 { const W = mundo(); W.H.notas[N1] = nota(N1, "NE4268", menosHabiles(1), 191.82);
   W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000013", n: N1, ef: 191, ab: 191 }) });
-  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000013", aj: "1" });
-  si("13 registrado", g.reg.ok); eq("13 un pago", W.H.pays.length, 1); si("13 aviso", /crea en Holded la cuenta/.test(g.reg.aviso)); }
-// 14) Holded no acepta el ajuste negativo: el pago queda, la nota queda a favor y se avisa
-{ const W = mundo({ tesoreria: TES, negRompe: true }); W.H.notas[N1] = nota(N1, "NE4269", menosHabiles(1), 191.82);
-  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000014", n: N1, ze: 192, ab: 192 }) });
-  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000014", aj: "1" });
-  si("14 registrado", g.reg.ok); eq("14 a favor", W.H.notas[N1].paymentsPending, -0.18); si("14 aviso", /no aceptó el ajuste/.test(g.reg.aviso)); }
-// 15) Nota que quedó con centavos (sin cobro): «Cuadrar» desde administración
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000013", aj: "1" }); si("13 registrado", g.reg.ok); eq("13 saldada sin cuenta", W.H.notas[N1].paymentsPending, 0);
+  const W2 = mundo(); W2.H.notas[N1] = nota(N1, "NE4268", menosHabiles(1), 195);
+  const b = W2.ctx.cobranzas({ a: "cobro", ...V, k: "ADM", x: x({ id: "uid-00000021", n: N1, ef: 190, ab: 190, aj: "1" }) });
+  si("13 >3 registrado", b.reg.ok); eq("13 >3 quedan", W2.H.notas[N1].paymentsPending, 5); si("13 aviso", /crea en Holded la cuenta/.test(b.reg.aviso)); }
+// 14) Más de $3 de más: ajuste negativo en la cuenta; si Holded no lo acepta, el pago queda y se avisa
+{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4269", menosHabiles(1), 95);
+  const b = W.ctx.cobranzas({ a: "cobro", ...V, k: "ADM", x: x({ id: "uid-00000014", n: N1, ze: 100, ab: 100, aj: "1" }) });
+  eq("14 pagos", W.H.pays.map(p => [p.amount, p.treasury === AJ]), [[100, false], [-5, true]]); eq("14 saldada", W.H.notas[N1].paymentsPending, 0); eq("14 sin línea", W.H.notas[N1].products.length, 2);
+  const W2 = mundo({ tesoreria: TES, negRompe: true }); W2.H.notas[N1] = nota(N1, "NE4269", menosHabiles(1), 95);
+  const c = W2.ctx.cobranzas({ a: "cobro", ...V, k: "ADM", x: x({ id: "uid-00000015", n: N1, ze: 100, ab: 100, aj: "1" }) });
+  si("14 registrado", c.reg.ok); eq("14 a favor", W2.H.notas[N1].paymentsPending, -5); si("14 aviso", /no aceptó el ajuste/.test(c.reg.aviso)); }
+// 15) Nota ya pagada con centavos (sin cobro): «Cuadrar» lleva la nota a lo pagado
 { const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4270", menosHabiles(1), 100.4, { paymentsTotal: 100, paymentsPending: 0.4 });
-  const g = W.ctx.cobranzas({ a: "adaj", k: "ADM", n: N1 }); eq("15 ok", g.estado, "ok"); eq("15 ajuste", W.H.pays.map(p => p.amount), [0.4]); eq("15 saldada", W.H.notas[N1].paymentsPending, 0);
+  const g = W.ctx.cobranzas({ a: "adaj", k: "ADM", n: N1 }); eq("15 ok", g.estado, "ok"); eq("15 sin pagos", W.H.pays.length, 0); eq("15 nota", [W.H.notas[N1].total, W.H.notas[N1].paymentsPending, ult(W.H.notas[N1]).price], [100, 0, -0.4]);
   eq("15 sin llave", W.ctx.cobranzas({ a: "adaj", k: "x", n: N1 }).estado, "no"); }
 // 16) Cobro de administración que se pasa por más de $0,50: solo se acepta si cuadra
 { const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4271", menosHabiles(1), 98.3);
   const a = W.ctx.cobranzas({ a: "cobro", ...V, k: "ADM", x: x({ id: "uid-00000016", n: N1, ef: 100, ab: 100 }) }); eq("16 sin cuadrar no", a.estado, "error");
   const b = W.ctx.cobranzas({ a: "cobro", ...V, k: "ADM", x: x({ id: "uid-00000017", n: N1, ef: 100, ab: 100, aj: "1" }) });
-  eq("16 ok", b.estado, "ok"); eq("16 pagos", W.H.pays.map(p => p.amount), [100, -1.7]); eq("16 saldada", W.H.notas[N1].paymentsPending, 0); }
-// 18) Con otro cobro de la misma nota por registrar no se cuadra (se comería ese cobro)
-{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4273", menosHabiles(1), 300);
-  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000019", n: N1, ef: 100, ab: 100 }) }); W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000020", n: N1, ze: 199.7, ab: 199.7 }) });
-  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000019", aj: "1" }); si("18 registrado", g.reg.ok); eq("18 sin ajuste", W.H.pays.length, 1); si("18 aviso", /otro cobro por registrar/.test(g.reg.aviso));
-  eq("18 adaj detenido", W.ctx.cobranzas({ a: "adaj", k: "ADM", n: N1 }).estado, "error");
-  const g2 = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000020", aj: "1" }); eq("18 ahora sí", W.H.pays.map(p => p.amount), [100, 199.7, 0.3]); eq("18 saldada", W.H.notas[N1].paymentsPending, 0); }
+  eq("16 ok", b.estado, "ok"); eq("16 pagos", W.H.pays.map(p => p.amount), [100]); eq("16 nota", [W.H.notas[N1].total, W.H.notas[N1].paymentsPending], [100, 0]); }
 // 17) Un vendedor no puede pedir que se cuadre
 { const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4272", menosHabiles(1), 98.3);
   eq("17 vendedor tope", W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000018", n: N1, ef: 100, ab: 100, aj: "1" }) }).estado, "error"); }
+// 18) Con otro cobro de la misma nota por registrar no se cuadra (se comería ese cobro)
+{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4273", menosHabiles(1), 300);
+  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000019", n: N1, ef: 100, ab: 100 }) }); W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000020", n: N1, ze: 199.7, ab: 199.7 }) });
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000019", aj: "1" }); si("18 registrado", g.reg.ok); eq("18 sin línea", W.H.notas[N1].products.length, 2); si("18 aviso", /otro cobro por registrar/.test(g.reg.aviso));
+  eq("18 adaj detenido", W.ctx.cobranzas({ a: "adaj", k: "ADM", n: N1 }).estado, "error");
+  W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000020", aj: "1" }); eq("18 ahora sí", [W.H.pays.map(p => p.amount), W.H.notas[N1].total, W.H.notas[N1].paymentsPending], [[100, 199.7], 299.7, 0]); }
+// 19) Si Holded cambia una línea al poner el ajuste, la nota vuelve a como estaba y no se registra el pago
+{ const W = mundo({ tesoreria: TES, itemsRompe: true }); W.H.notas[N1] = nota(N1, "NE4274", menosHabiles(1), 191.82);
+  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000022", n: N1, ze: 192, ab: 192 }) });
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000022", aj: "1" });
+  si("19 detenido", g.reg.alto && /quedó como estaba/.test(g.reg.msg)); eq("19 sin pago", W.H.pays.length, 0); eq("19 nota como estaba", [W.H.notas[N1].total, W.H.notas[N1].products.length, W.H.notas[N1].products[0].price], [191.82, 2, 191.82]); }
+// 20) Nota con descuento general (BCV / contado): no lleva línea, va a la cuenta de ajustes
+{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4275", menosHabiles(1), 85, { subtotal: 100, discount: 15 });
+  const b = W.ctx.cobranzas({ a: "cobro", ...V, k: "ADM", x: x({ id: "uid-00000023", n: N1, ze: 85.3, ab: 85.3, aj: "1" }) });
+  eq("20 pagos", W.H.pays.map(p => [p.amount, p.treasury === AJ]), [[85.3, false], [-0.3, true]]); eq("20 saldada", W.H.notas[N1].paymentsPending, 0); eq("20 sin PUT de líneas", W.H.puts.length, 0); }
 
 console.log(ok + " bien, " + mal + " mal"); if(mal) process.exit(1);
