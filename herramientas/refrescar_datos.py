@@ -33,7 +33,8 @@ cl = sorted(([x['id'], ' '.join((x.get('name') or '').split()), ((x.get('tags') 
              if x.get('type') == 'client' and (x.get('name') or '').strip() and x['id'] != NUEVO['id']), key=lambda r: r[1].upper())
 assert len(precios) > 50 and len(cl) > 50, 'Holded devolvió muy pocos datos; no se toca datos.json'
 # --- Cobranzas: notas pendientes (y saldadas hace poco) por cliente. Solo lectura de Holded.
-# Cada nota: [id, número, idCliente, fecha, vence, total, pagado, pendiente, tarifa, desc%, saldoReal, saldoBs, [[idPago, monto, fecha, cuenta, archivada]], factura]
+# Cada nota: [id, número, idCliente, fecha, vence, total, pagado, pendiente, tarifa, desc%, saldoReal, saldoBs, [[idPago, monto, fecha, cuenta, archivada]], factura, cliente]
+#   cliente = nombre del cliente (la nota puede ser de un cliente que no está en la cartera del vendedor).
 #   factura = [número, iva] si la nota ya tiene factura AdriMan (etiquetas fac###### e iva##### que pone Claude al emitirla; iva en centavos de
 #   dólares de la nota, None si no vino), o None. El portal muestra la nota con su factura y el IVA aparte del neto.
 #   tarifa: 'u' USD, 'l' Lista, 'b' BCV, '?' no se pudo determinar (se deduce comparando los precios de la nota con las tarifas actuales).
@@ -63,7 +64,11 @@ def factura(tags):
         if m: f = m.group(1).zfill(6)
         if v: iva = int(v.group(1)) / 100
     return [f, iva] if f else None
-tagcl = {x['id']: ((x.get('tags') or [''])[0] or '') for x in conts}
+# Cada nota va a la bandeja de TODOS los vendedores cuya etiqueta tenga el cliente (cualquiera, no solo la primera) o la propia nota
+# (24 nov 2026, regla de Mango: NE4265 con #elias y #rm la ven los dos). El receptor acepta el cobro con la misma regla.
+tagsde = lambda L: {str(t).strip().lower() for t in (L or []) if str(t).strip()}
+tagcl = {x['id']: tagsde(x.get('tags')) for x in conts}
+nomcl = {x['id']: ' '.join((x.get('name') or '').split()) for x in conts}
 corte = datetime.datetime.now().timestamp() - 90 * 86400; nt = {}   # todas las notas con pagos de los últimos 90 días: alimentan «Mis recibos» (archivo de 3 meses)
 corteFac = datetime.datetime.now().timestamp() - 90 * 86400   # notas con factura AdriMan: el IVA puede llegar después del neto (la app las deja abiertas hasta resolverlo)
 for n in notas:
@@ -73,8 +78,9 @@ for n in notas:
     t, d = tarifa(n), float(n.get('discount') or 0)
     real = round(pen * FBCV, 2) if t == 'b' and d == 0 else pen
     bcv = (round(pen / (1 - d / 100), 2) if d > 0 else pen) if t == 'b' else None   # lo que falta en dólares a tasa BCV
-    nt.setdefault(tagcl.get(n.get('contact'), ''), []).append([n['id'], n['docNumber'], n.get('contact'), n.get('date'), n.get('dueDate') or None,
-        round(float(n.get('total') or 0), 2), round(float(n.get('paymentsTotal') or 0), 2), pen, t, d, real, bcv, pag, factura(n.get('tags'))])
+    fila = ([n['id'], n['docNumber'], n.get('contact'), n.get('date'), n.get('dueDate') or None,
+        round(float(n.get('total') or 0), 2), round(float(n.get('paymentsTotal') or 0), 2), pen, t, d, real, bcv, pag, factura(n.get('tags')), nomcl.get(n.get('contact'), '')])
+    for tg in tagcl.get(n.get('contact'), set()) | tagsde(n.get('tags')): nt.setdefault(tg, []).append(fila)
 corte150 = datetime.datetime.now().timestamp() - 150 * 86400
 ntar = {n['id']: tarifa(n) for n in notas if not n.get('draft') and n.get('docNumber') and (float(n.get('paymentsPending') or 0) >= 0.01 or any((y.get('date') or 0) >= corte150 for y in (n.get('paymentsDetail') or [])))}
 assert len(notas) > 100, 'Holded devolvió muy pocas notas; no se toca datos.json'
@@ -84,7 +90,7 @@ ADM = VJ.get('admin') or os.environ.get('NTX_ADMIN') or ''   # llave de administ
 for v in VJ['v']:
     cod = re.sub(r'[^A-Z0-9]', '', (v['codigo'] + v['s']).upper()); salt, iv = os.urandom(16), os.urandom(12)
     key = hashlib.pbkdf2_hmac('sha256', cod.encode(), salt, 150000, 32)
-    data = dict(v=dict(k=v['k'], nombre=v['nombre'], tag=v['tag']), fecha=ahora, p=precios, nuevo=NUEVO, cl=[r for r in cl if r[2] == v['tag']], nt=sorted(nt.get(v['tag'], []), key=lambda r: r[3] or 0))
+    data = dict(v=dict(k=v['k'], nombre=v['nombre'], tag=v['tag']), fecha=ahora, p=precios, nuevo=NUEVO, cl=[r for r in cl if r[2] == v['tag']], nt=sorted(nt.get(v['tag'].strip().lower(), []), key=lambda r: r[3] or 0))
     if v['tag'] == 'rm' and ADM: data['adm'] = ADM; data['ntar'] = ntar   # tarifa de las notas de todos: ADMIN › Cobros (equivalente BCV en la carpeta y cobro de administración)
     blobs.append(dict(s=b64(salt), i=b64(iv), d=b64(AESGCM(key).encrypt(iv, json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode(), None))))
     print(v['tag'], len(data['cl']), 'clientes ·', sum(1 for r in data['nt'] if r[7] >= 0.01), 'notas pendientes')

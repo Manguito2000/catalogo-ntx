@@ -118,7 +118,7 @@ function cobroNuevo(tag, q) {
     var hoja = hojaCobros(), filas = leerCobros(hoja);
     for (var i = 0; i < filas.length; i++) if (filas[i].uid === uid) return { estado: "ok", repetido: true, cobro: vista(filas[i]) };   // reenvío del mismo cobro
     var nota = holded("documents/invoice/" + nid), cont = holded("contacts/" + nota.contact), tagCli = ((cont.tags || [""])[0] || "");
-    if (!adm && tagCli !== tag) return { estado: "error", msg: "Esa nota no es de un cliente de tu cartera" };
+    if (!adm && !notaDeVendedor(nota, cont, tag)) return { estado: "error", msg: "Esa nota no es de un cliente de tu cartera" };
     var tagFila = adm ? tagCli : tag, ckey = adm ? "COB_N_A" : "COB_N_" + tag;
     var usado = function (r) { return filas.some(function (f) { return f.recibo === r && (adm ? f.org === "admin" : f.tag === tag && f.org !== "admin"); }); };
     var fac0 = fcDeTags(nota.tags);
@@ -619,8 +619,14 @@ function fcNota(tag, nid) {
   nid = String(nid || "").replace(/[^a-f0-9]/g, "");
   if (nid.length !== 24) throw new Error("Nota no válida");
   var nota = holded("documents/invoice/" + nid), cont = holded("contacts/" + nota.contact);
-  if (((cont.tags || [""])[0] || "") !== tag) throw new Error("Esa nota no es de un cliente de tu cartera");
+  if (!notaDeVendedor(nota, cont, tag)) throw new Error("Esa nota no es de un cliente de tu cartera");
   return nota;
+}
+/* (24 nov 2026, regla de Mango) la nota es del vendedor si su etiqueta está en el cliente (cualquiera, no solo la primera) o en la nota.
+   Es la misma regla con que refrescar_datos.py reparte las notas en las bandejas. */
+function notaDeVendedor(nota, cont, tag) {
+  var t = String(tag || "").trim().toLowerCase(); if (!t) return false;
+  return [].concat(cont.tags || [], nota.tags || []).some(function (x) { return String(x || "").trim().toLowerCase() === t; });
 }
 function fcHoja(nombre, cols) {
   var libro = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty("COB_HOJA") || ""), h = libro.getSheetByName(nombre);

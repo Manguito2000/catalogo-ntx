@@ -29,7 +29,7 @@ const cbRet = n => (CB.ret && CB.ret[n.id]) || null;
 const cbIvaDe = (n, neto) => { const iva = r2(neto * cbIvaR(n)), rt = (cbRet(n) || {}).rt || 0, ret = r2(iva * rt / 100); return { iva, rt, ret, paga:r2(iva - ret) }; };
 const cbSolDe = n => (CB.sol || []).find(q => q.n === n.id && q.est === "pendiente") || null;
 const cbNotas = () => { const L = (S.nt || []).map(NT); if(CB.adNota && VISTA === "admin" && !L.some(n => n.id === CB.adNota[0])) L.push(NT(CB.adNota)); return L; };   // + la nota que cobra administración
-const cbCliente = id => { const c = (S.clientes || []).find(x => x.id === id); return c ? c.n : (CB.adCli && CB.adCli[id]) || "Cliente"; };
+const cbCliente = id => { const c = (S.clientes || []).find(x => x.id === id); return c ? c.n : (CB.adCli && CB.adCli[id]) || ((S.nt || []).find(r => r[2] === id && r[14]) || [])[14] || "Cliente"; };   // r[14]: nombre del cliente que manda refrescar_datos.py (notas de clientes fuera de la cartera, por etiqueta de la nota o del cliente)
 /* IVA ya cobrado de una nota facturada (cobros no anulados) y lo que falta: el IVA no va a Holded, solo se lleva aquí */
 const cbIvaRec = n => CB.adX && n && n.id === CB.adX.id && VISTA === "admin" ? r2(CB.adX.ivr || 0) : r2(cbCobros().filter(c => c.n === n.id && c.est !== "anulado" && c.est !== "rechazo").reduce((s, c) => s + (Number(c.iv) || 0), 0));
 const cbIvaPend = n => !n || !n.fac ? 0 : Math.max(0, r2(cbIvaT(n) - cbIvaRec(n)));
