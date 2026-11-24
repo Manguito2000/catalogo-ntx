@@ -578,7 +578,7 @@ function cbSaldoNota(){
 function cbDcHtml(n, x){
   if(!cbDcOk(n, x.ed)) return "";
   const on = CB.f.dc !== "" && CB.f.dc != null, adm = !!(CB.adNota && CB.adNota[0] === n.id && VISTA === "admin");
-  return `<div class="cbdc w2${on ? " on" : ""}" id="cbDc"><label class="cbdck"><input type="checkbox" data-cb="dcon"${on ? " checked" : ""}><span><b>Descuento de contado</b><small>${adm ? "El cliente pagó casi de contado: se descuenta de lo que falta" : "Se lo diste al cliente porque pagó casi de contado"}</small></span></label>
+  return `<div class="cbdc w2${on ? " on" : ""}" id="cbDc"><label class="cbdck"><input type="checkbox" data-cb="dcon"${on ? " checked" : ""}><span><b>Descuento manual</b><small>${adm ? "El cliente pagó casi de contado: se descuenta de lo que falta" : "Se lo diste al cliente porque pagó casi de contado"}</small></span></label>
     ${on ? `<label class="cbdcp"><span>Descuento</span><span class="pct"><input class="fld num" id="cb_dc" data-cb-in="dc" type="text" inputmode="decimal" autocomplete="off" value="${esc(CB.f.dc)}"><b>%</b></span></label><div class="cbdci" id="cbDcI"></div>` : ""}</div>`;
 }
 function cbFormHtml(){
