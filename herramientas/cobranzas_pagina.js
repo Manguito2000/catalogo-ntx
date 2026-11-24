@@ -478,14 +478,14 @@ function cobNav(v){
 const cbF0 = () => ({ ef:"", us:"", ze:"", mp:"", bs:"", bsb:"", tb:"", ta:"", fp:"", rf:"", dd:"", dc:"", nv:"", aj:"" });
 /* ---------- decimales (24 nov 2026, regla de Mango) ----------
    Menos de $0,50 de diferencia entre la nota y lo que entró son centavos: el vendedor no los cobra ni los devuelve, y el recibo dice saldo $0,00.
-   Administración decide al registrar si «cuadra»: la diferencia va a la cuenta «Ajustes por redondeo» de Holded y la nota queda en $0,00 (sin límite para ella). */
-const CENT = 0.5, AJ_LINEA_MAX = 3;   // hasta $3 (nota sin descuento general) se cuadra con una línea en la nota; más, con la cuenta de ajustes
+   Administración decide al registrar si «cuadra»: la nota se lleva a lo cobrado con una línea «Ajuste por redondeo» y el pago entra completo a su cuenta (ya no hay cuenta de ajustes). Hasta $3. */
+const CENT = 0.5, AJ_LINEA_MAX = 3;   // hasta $3 se cuadra con una línea en la nota (también con descuento general); más de $3 no se cuadra
 const cbEsAjuste = cta => /ajustes?\s+por\s+redondeo/i.test(String(cta || ""));   // pagos de la cuenta «Ajustes por redondeo» de Holded
 /* cobro de administración (serie A-): ¿cuadra los decimales al registrar? null = no aplica (vendedor, receptor viejo, otro cobro de la nota por
    registrar o nota BCV sin su descuento en Holded) · si no la tocó, se marca sola cuando la diferencia es de centavos */
 function cbAjAdm(x, dif){
   if(!x || x.multi || VISTA !== "admin" || !(AD.cb && AD.cb.d && AD.cb.d.aj) || !(CB.adNota && CB.adNota[0] === x.n.id) || ((CB.adX && CB.adX.pc) || []).length || (esB(x.n) && !(x.n.desc > 0))) return null;
-  if(Math.abs(dif) < 0.01) return false;
+  if(Math.abs(dif) < 0.01 || Math.abs(dif) > AJ_LINEA_MAX + 0.001) return false;
   return CB.f.aj === "" || CB.f.aj == null ? Math.abs(dif) < CENT : CB.f.aj === "1";
 }
 const cbDifTxt = (d, n) => d >= 0.01 ? (d < CENT ? "Quedan " + cbM(d, n) + " de centavos" : "Quedan " + cbM(d, n) + " por cobrar") : d <= -0.01 ? "Pagó " + cbM(-d, n) + " de más" : "Cubre la nota exacta";
@@ -867,8 +867,7 @@ function cbSum(){
   const dif = r2(x.saldo - c.bv), ajA = cbAjAdm(x, dif), tl = $("cbTopL");
   const aL = $("cbAjL"); if(aL) aL.hidden = true;
   if(aL && ajA != null){ aL.hidden = !(c.nom > 0) || Math.abs(dif) < 0.01; const cb = $("cbAj"); if(cb) cb.checked = !!ajA;
-    const tx = $("cbAjT"); if(tx) tx.textContent = Math.abs(dif) <= AJ_LINEA_MAX && !(x.n.desc > 0) && !x.dr ? "La nota pasa a lo cobrado con una línea «Ajuste por redondeo» de " + (dif > 0 ? "−" : "+") + money(Math.abs(dif)) + "; el pago entra completo a su cuenta"
-      : (dif > 0 ? "+" : "−") + money(Math.abs(dif)) + " en la cuenta Ajustes por redondeo: la nota queda en " + money(0) + (AD.cb.d.ajc ? "" : " · falta crear esa cuenta en Holded"); }
+    const tx = $("cbAjT"); if(tx) tx.textContent = "La nota pasa a lo cobrado con una línea «Ajuste por redondeo» de " + (dif > 0 ? "−" : "+") + money(Math.abs(dif)) + "; el pago entra completo a su cuenta"; }
   if(tl){ tl.hidden = !(c.nom > 0); tl.innerHTML = c.nom > 0 ? `<span>Este cobro abona <b>${cbM(c.bv, n)}</b></span><span class="${dif >= CENT ? "" : "ok"}">${esc(cbDifTxt(dif, n))}</span>` : ""; }
   const sobra = !x.multi && ((c.bv > x.saldo + 0.5 && !ajA) || c.iv > cbIvaPend(n) + 0.5), sinTasa = !esB(n) && (c.bs > 0 || cbNum(CB.f.bsb) > 0) && !(cbNum(CB.f.ta) > 0), sinTasaB = esB(n) && cbNum(CB.f.bsb) > 0 && !(cbNum(CB.f.tb) > 0);
   s.innerHTML = esB(n)
@@ -1652,23 +1651,22 @@ function admAjInfo(c){
   const suma = r2((c.partes || []).filter(p => (c.reg || []).indexOf(p.k) < 0).reduce((s, p) => s + p.m, 0));
   const dcPend = c.dc > 0 && (c.dce === "automático" || c.dce === "aprobado") && !c.dch && !(c.nd > 0) ? (Number(c.dcm) || 0) : 0;   // el descuento de contado se pone antes del pago
   const dif = r2(c.npen - dcPend - suma), otro = (d.cob || []).find(y => y.n === c.n && y.id !== c.id && (y.est === "cobrado" || y.est === "revisar")) || null, bcvSin = c.tb === "b" && !(c.nd > 0);
-  const puede = !!d.aj && Math.abs(dif) >= 0.01 && !otro && !bcvSin, k = AD.cb.aj || (AD.cb.aj = {});
-  return { dif, puede, otro, bcvSin, linea:Math.abs(dif) <= AJ_LINEA_MAX && !(c.nd > 0) && !dcPend, on:puede && (c.id in k ? !!k[c.id] : Math.abs(dif) < CENT) };
+  const grande = Math.abs(dif) > AJ_LINEA_MAX + 0.001, puede = !!d.aj && Math.abs(dif) >= 0.01 && !grande && !otro && !bcvSin, k = AD.cb.aj || (AD.cb.aj = {});
+  return { dif, puede, otro, bcvSin, grande, linea:true, on:puede && (c.id in k ? !!k[c.id] : Math.abs(dif) < CENT) };
 }
 function admAjHtml(c, a, grupo){
   if(!a || (grupo && Math.abs(a.dif) < 0.01)) return "";
   const nh = `<div class="adnh">${grupo ? esc(c.nn) + " · " : ""}En Holded debe <b class="num">${money(c.npen)}</b> · ${a.dif >= 0.01 ? `al registrar quedarían <b class="num">${money(a.dif)}</b>` : a.dif <= -0.01 ? `el cobro se pasa por <b class="num">${money(-a.dif)}</b>` : "queda en <b>${money(0)}</b>"}</div>`;
-  if(!a.puede) return nh + (a.otro && Math.abs(a.dif) >= 0.01 ? `<small class="hint">Para cuadrar los decimales, registra primero ${esc(a.otro.rec || "el otro cobro")}.</small>` : "");
-  return nh + `<label class="adaj"><input type="checkbox" data-ad="ajt" data-id="${esc(c.id)}"${a.on ? " checked" : ""}><span><b>Cuadrar decimales${grupo ? " de " + esc(c.nn) : ""}</b><small>${a.linea ? `La nota pasa a ${money(r2(c.npen - a.dif))} con una línea «Ajuste por redondeo» de ${a.dif > 0 ? "−" : "+"}${money(Math.abs(a.dif))}; el pago entra completo a su cuenta`
-      : `${a.dif > 0 ? "+" : "−"}${money(Math.abs(a.dif))} en la cuenta «Ajustes por redondeo»: la nota queda en ${money(0)}${(AD.cb.d || {}).ajc ? "" : ` <span class="w">· falta crear esa cuenta en Holded</span>`}`}</small></span></label>`;
+  if(!a.puede) return nh + (a.otro && Math.abs(a.dif) >= 0.01 ? `<small class="hint">Para cuadrar los decimales, registra primero ${esc(a.otro.rec || "el otro cobro")}.</small>` : a.grande ? `<small class="hint">La diferencia pasa de ${money(AJ_LINEA_MAX)}: no se cuadra. ${a.dif > 0 ? "El pago se registra tal cual y la nota queda con saldo pendiente." : "Corrige el monto del cobro: no se puede registrar de más."}</small>` : "");
+  return nh + `<label class="adaj"><input type="checkbox" data-ad="ajt" data-id="${esc(c.id)}"${a.on ? " checked" : ""}><span><b>Cuadrar decimales${grupo ? " de " + esc(c.nn) : ""}</b><small>La nota pasa a ${money(r2(c.npen - a.dif))} con una línea «Ajuste por redondeo» de ${a.dif > 0 ? "−" : "+"}${money(Math.abs(a.dif))}; el pago entra completo a su cuenta</small></span></label>`;
 }
-const admAjTxt = a => !a || !a.on ? "" : a.linea ? " · línea de ajuste " + (a.dif > 0 ? "−" : "+") + money(Math.abs(a.dif)) + " en la nota" : " · " + (a.dif > 0 ? "+" : "−") + money(Math.abs(a.dif)) + " en Ajustes por redondeo";
+const admAjTxt = a => !a || !a.on ? "" : " · línea de ajuste " + (a.dif > 0 ? "−" : "+") + money(Math.abs(a.dif)) + " en la nota";
 const admAjEx = c => { const a = admAjInfo(c); return a && a.on ? { aj:"1" } : {}; };
 /* notas pagadas que quedaron con centavos (sin cobro por registrar): se cuadran a $0,00 con un toque */
 const admCent = d => !d || !d.aj ? [] : (d.np || []).filter(n => n.pag > 0 && n.pen >= 0.01 && n.pen < 1 && !(n.pc || []).length && admVenOk(n.ven));
 const admCentCard = n => `<div class="adw"><span class="rct dif">CENTAVOS</span><article class="rcc adc"><div class="adch"><span class="adcl"><span class="adcs">${esc(n.num)} · ${esc(admVenTxt(n.ven))}</span><b class="adcn">${esc(n.cn || "Cliente")}</b>
     <span class="adcs">Pagado ${money(n.pag)} de ${money(n.tot)}</span></span><span class="adcr"><b class="bs num">${money(n.pen)}</b><small>PENDIENTE</small></span></div>
-    <p class="hint">Quedaron centavos en la nota. ${n.d > 0 ? `Cuadrar registra ${money(n.pen)} en la cuenta «Ajustes por redondeo»` : `Cuadrar le pone a la nota una línea «Ajuste por redondeo» de −${money(n.pen)}: queda por lo que se pagó`} y su saldo en ${money(0)}.</p>
+    <p class="hint">Quedaron centavos en la nota. Cuadrar le pone a la nota una línea «Ajuste por redondeo» de −${money(n.pen)}: queda por lo que se pagó y su saldo en ${money(0)}.</p>
     <div class="adbt"><button class="send dk" data-ad="ajnota" data-id="${esc(n.id)}"${AD.cb.busy === n.id ? " disabled" : ""}>CUADRAR A CERO</button></div></article></div>`;
 function admRegCard(c){
   const conf = AD.cb.conf === c.id, busy = AD.cb.busy === c.id, hechas = c.reg || [], partes = c.partes || [], falta = partes.filter(p => hechas.indexOf(p.k) < 0);

@@ -28,13 +28,13 @@ const fila = (id, num, total, pagado, extra = []) => [id, num, "c1", 1795215600,
   const a = W.X.admAjInfo(c); eq("5 info", [a.dif, a.puede, a.on], [-0.18, true, true]);
   const h = W.X.admRegCard(c); si("5 casilla", /data-ad="ajt"[^>]*checked/.test(h) && /La nota pasa a \$192,00 con una línea «Ajuste por redondeo» de \+\$0,18/.test(h)); eq("5 por línea", W.X.admAjInfo(c).linea, true); si("5 sin aviso de tope", !/solo tiene/.test(h));
   W.X.AD.cb.aj = { u1: false }; eq("5 desmarcada", W.X.admAjInfo(c).on, false);
-  W.X.AD.cb.aj = {}; const big = Object.assign({}, c, { npen: 200 }); eq("5 diferencia grande: no se marca sola", [W.X.admAjInfo(big).puede, W.X.admAjInfo(big).on], [true, false]);
+  W.X.AD.cb.aj = {}; const big = Object.assign({}, c, { npen: 200 }); eq("5 más de $3: no se cuadra", [W.X.admAjInfo(big).puede, W.X.admAjInfo(big).on, W.X.admAjInfo(big).grande], [false, false, true]);
   W.X.AD.cb.d = { cob: [c, { id: "u2", n: "n1", est: "cobrado", rec: "E-0002" }], aj: 1 }; const o = W.X.admAjInfo(c); eq("5 con otro cobro no", [o.puede, !!o.otro], [false, true]);
   W.X.AD.cb.d = { cob: [c] }; eq("5 receptor viejo no", W.X.admAjInfo(c).puede, false);
   W.X.AD.cb.d = { cob: [c], aj: 1 }; eq("5 BCV sin descuento no", W.X.admAjInfo(Object.assign({}, c, { tb: "b", nd: 0 })).puede, false);
   si("5 con línea no pide la cuenta", !/falta crear esa cuenta/.test(W.X.admRegCard(c)));
-  const g8 = Object.assign({}, c, { npen: 200 }); W.X.AD.cb.aj = { u1: true }; si("5 más de $3: cuenta", /\$8,00 en la cuenta «Ajustes por redondeo»/.test(W.X.admRegCard(g8)) && /falta crear esa cuenta/.test(W.X.admRegCard(g8))); eq("5 más de $3 sin línea", W.X.admAjInfo(g8).linea, false);
-  eq("5 nota con descuento sin línea", W.X.admAjInfo(Object.assign({}, c, { nd: 15 })).linea, false); }
+  const g8 = Object.assign({}, c, { npen: 200 }); W.X.AD.cb.aj = { u1: true }; const h8 = W.X.admRegCard(g8); si("5 más de $3: sin casilla ni cuenta", !/data-ad="ajt"/.test(h8) && !/Ajustes por redondeo/.test(h8) && /pasa de \$3/.test(h8));
+  const hd = W.X.admRegCard(Object.assign({}, c, { nd: 15 })); si("5 nota con descuento: línea", /data-ad="ajt"/.test(hd) && /línea «Ajuste por redondeo»/.test(hd) && !/Ajustes por redondeo/.test(hd)); }
 // 6) ADMIN: notas con centavos (pagadas, sin cobro por registrar)
 { const W = cargar(); W.X.AD.cb.d = { aj: 1, np: [{ id: "a", num: "NE1", pag: 100, pen: 0.4, tot: 100.4, ven: "Elías", pc: [] }, { id: "b", num: "NE2", pag: 0, pen: 0.4, tot: 0.4, pc: [] }, { id: "c", num: "NE3", pag: 50, pen: 0.4, pc: [["x"]] }, { id: "d", num: "NE4", pag: 50, pen: 3, pc: [] }] };
   eq("6 lista", W.X.admCent(W.X.AD.cb.d).map(n => n.num), ["NE1"]); }
