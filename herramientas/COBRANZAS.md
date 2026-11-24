@@ -146,3 +146,25 @@ Caso: NE4250 era a crédito; Gabriel le dio al cliente el 15 % porque pagó prá
 **Dónde está en el código**: bloque `/*CONTADO*/` de `cobranzas_pagina.js` (funciones puras + `cbDcOk`, `cbDcDraft`, `cbDcPc`, `cbDcTxt`); `cbDcHtml` (casilla) y el campo «Nota para administración» en `cbFormHtml`; ADMIN: `admNvHtml` (recuadro de la nota), `admDcHtml` (bloque de descuento en «Por registrar»), `admDcfCard` («Con diferencia»). Los datos vienen de config.json (`descuento_contado`, `contado_dias_habiles`, `feriados`).
 **Notas**: `x` del cobro crece con `nv` (≤300): el receptor ahora acepta hasta 4500 caracteres. Un pago para varias notas no lleva descuento ni nota (v1). La nota del vendedor se ve solo en ADMIN (el vendedor la ve en «Abonos que anotaste»).
 **Para publicar**: 1) pegar el `cobranzas_apps_script.gs` nuevo en Apps Script y hacer versión nueva; 2) `portal.py abrir` → `aplicar_cobranzas.py` → `aplicar_jalar.py` → `portal.py armar`; 3) subir config.json con los feriados (ya está en esta rama).
+
+## Bandejas por etiqueta y decimales (24 nov 2026)
+Caso: NE4265 (ELÍAS ISTANBOULIE, #elias y #rm) debía $191,82 y el cliente pagó $192.
+
+**Bandejas**: `refrescar_datos.py` pone cada nota en la bandeja de TODOS los vendedores cuya etiqueta tenga el cliente (cualquiera, no solo la primera) o la propia nota, y manda el nombre del cliente en `nt[14]` (la página lo usa si el cliente no está en la cartera). El receptor acepta el cobro con la misma regla (`notaDeVendedor`). La cartera para pedidos y la carpeta física siguen con la primera etiqueta del cliente.
+
+**Decimales: regla de Mango**
+- Menos de $0,50 de diferencia entre la nota y lo que entró son **centavos**: el vendedor no los cobra ni los devuelve y el recibo dice saldo $0,00 (no muestra el redondeo). Desde $0,50 es saldo de verdad.
+- **Solo administración cuadra**, al registrar en ADMIN › Cobros (sin límite de monto). La casilla «Cuadrar decimales» viene marcada sola cuando la diferencia es de centavos; con más, Mango la marca si quiere.
+- En Holded: lo que entró va a su cuenta real (así cada cuenta cuadra con el banco) y la diferencia va como un pago aparte en la cuenta de tesorería **«Ajustes por redondeo»** (+ si pagó de menos, − si pagó de más). La nota queda en $0,00. Cada ajuste queda anotado en la hoja «Ajustes» del libro de cobranzas y en la columna «Ajuste redondeo $» de Cobros.
+- Los ajustes no son dinero: no van a «Por anotar en carpeta», no se concilian, no son «pagos sin dueño» y no salen en «Mis recibos».
+- No se cuadra si la nota tiene otro cobro por registrar (se lo comería) ni si es BCV sin el descuento en Holded.
+
+**Pantallas**
+- Vendedor: la caja de la nota (cliente y «Falta por cobrar») se queda fija arriba mientras se llena el cobro, con «Este cobro abona $X · Pagó $0,18 de más / Quedan $0,32 de centavos / Quedan $0,82 por cobrar». En Pendientes, una nota con cobro anotado y centavos sale con saldo $0 y «Centavos: los cuadra administración». En «Un pago, varias notas», menos de $0,50 que sobran se suman a la última nota (no son saldo a favor).
+- ADMIN › Por registrar: cada tarjeta dice «En Holded debe $X · al registrar quedarían $Y / el cobro se pasa por $Y» y trae la casilla (en un pago de varias notas, una por nota con diferencia). El cobro de administración (A-) tiene la misma casilla.
+- ADMIN › Con diferencia: «Centavos» = notas ya pagadas que quedaron con menos de $1 pendiente y sin cobro por registrar → «CUADRAR A CERO».
+
+**Receptor**: `a=adreg&aj=1` cuadra al registrar · `a=cobro` de administración con `aj:"1"` en `x` (puede pasarse de lo que falta) · `a=adaj&k&n=<idNota>` cuadra una nota sin cobro · `a=adcob` responde `aj:1` (este receptor sabe cuadrar; la página solo muestra las casillas si lo ve) y `ajc` (la cuenta existe).
+**Antes de usarlo**: 1) crear en Holded la cuenta de tesorería «Ajustes por redondeo»; 2) pegar el `cobranzas_apps_script.gs` nuevo en Apps Script y hacer versión nueva. **Sin probar contra Holded real**: si acepta un pago negativo (cliente que pagó de más). Si no lo acepta, el pago queda registrado, la nota queda con los centavos a favor y la app lo avisa.
+**Pruebas**: `node herramientas/pruebas_pagina/prueba_redondeo.js` (página) y `receptor_contado.js` (casos 10–18).
+**Armado**: `aplicar_cobranzas.py` ahora exige que `/*FIN-COBRANZAS*/` sea lo último del CSS y del JS (antes el CSS del descuento de contado quedaba fuera de las marcas y se duplicaba en cada aplicación).

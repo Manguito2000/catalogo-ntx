@@ -12,6 +12,8 @@ def bloque(s, ini, fin, nuevo):
     if i < 0: return None
     k = s.find(fin, i); assert k > 0, 'bloque sin cierre'; return s[:i] + nuevo.strip() + s[k + len(fin):]
 css, js = lee('cobranzas_pagina.css'), lee('cobranzas_pagina.js')
+# todo el CSS y el JS van DENTRO de sus marcas: lo que quede después de /*FIN-COBRANZAS*/ se duplicaría en cada aplicación
+assert css.rstrip().endswith('/*FIN-COBRANZAS*/') and js.rstrip().endswith('/*FIN-COBRANZAS*/'), 'la marca /*FIN-COBRANZAS*/ debe ser lo último del archivo'
 NAV = ('<nav class="nav" id="nav" hidden aria-label="Secciones del portal">'
   '<button id="navPed" data-nav="ped"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8h12l-1 12H7L6 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg><span>PEDIDOS</span></button>'
   '<button id="navCob" data-nav="cob"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6.5 10v4M17.5 10v4"/></svg><span>COBRANZAS</span><span class="bdg" id="cobN" hidden></span></button></nav>\n')
@@ -92,5 +94,6 @@ if len(sys.argv) > 2:
     j, k = re.subn(r'/\*CTAS\*/.*?/\*FIN-CTAS\*/', lambda m: '/*CTAS*/' + json.dumps(C, ensure_ascii=False, separators=(',', ':')).replace('*/', '') + '/*FIN-CTAS*/', j, count=1, flags=re.S)
     assert k == 1, 'no encontré CB_CTAS en el catálogo'; print('cuentas del lector:', len(C))
 else: print('AVISO: sin V.json el lector de capturas no reconocerá las cuentas de la empresa')
+assert h.count('.cbdc{') == 1 and h.count('.cbtop{') == 1, 'CSS de cobranzas repetido en el catálogo'
 assert 'cobAbre' in j and h.count('id="vCob"') == 1 and h.count('id="nav"') == 1 and 'btnCob' not in h + j and '.cbs{' in h
 json.dump({'h': h, 'j': j}, open(p, 'w', encoding='utf-8')); print('Cobranzas aplicado:', len(h), len(j))

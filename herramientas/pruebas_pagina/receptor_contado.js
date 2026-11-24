@@ -1,4 +1,4 @@
-// Receptor de cobranzas con Google y Holded simulados: descuento de contado de punta a punta.
+// Receptor de cobranzas con Google y Holded simulados: descuento de contado y decimales (cuenta «Ajustes por redondeo») de punta a punta.
 const fs = require("fs"), vm = require("vm"), crypto = require("crypto");
 const GS = fs.readFileSync(require("path").join(__dirname, "..", "cobranzas_apps_script.gs"), "utf8");
 const CFG = JSON.parse(fs.readFileSync(require("path").join(__dirname, "..", "..", "config.json"), "utf8"));
@@ -33,12 +33,13 @@ function mundo(opts = {}) {
       let cod = 200, out;
       let r = /^documents\/invoice\/([a-f0-9]{24})(\/pay)?$/.exec(ruta);
       if (r && m === "get") out = JSON.parse(JSON.stringify(H.notas[r[1]]));
+      else if (r && r[2] && m === "post" && opts.negRompe && JSON.parse(op.payload).amount < 0) { cod = 400; out = { status: 0, info: "amount must be positive" }; }
       else if (r && r[2] && m === "post") { const b = JSON.parse(op.payload), n = H.notas[r[1]]; H.pays.push(b); n.paymentsDetail.push({ id: crypto.randomBytes(12).toString("hex"), amount: b.amount, date: b.date, bankId: b.treasury }); n.paymentsTotal += b.amount; n.paymentsPending = Math.round((n.total - n.paymentsTotal) * 100) / 100; out = { status: 1 }; }
       else if (r && m === "put") { const b = JSON.parse(op.payload), n = H.notas[r[1]]; H.puts.push(b);
         if (opts.putRompe) n.tags = []; else if ("tags" in b) n.tags = b.tags;
         n.discount = b.discount || 0; n.total = Math.round(n.subtotal * (100 - n.discount)) / 100; n.paymentsPending = Math.round((n.total - n.paymentsTotal) * 100) / 100; out = { status: 1 }; }
       else if (/^contacts\?page=/.test(ruta)) out = /page=1$/.test(ruta) ? Object.entries(H.contactos).map(([id, c]) => ({ id, ...c })) : [];
-      else if (ruta === "treasury") out = [];
+      else if (ruta === "treasury") out = opts.tesoreria || [];
       else if (/^contacts\//.test(ruta)) out = H.contactos[ruta.split("/")[1]];
       else if (/^documents\/invoice\?page=/.test(ruta)) out = /page=1$/.test(ruta) ? Object.values(H.notas) : [];
       else { cod = 404; out = {}; }
@@ -132,5 +133,53 @@ const V = { cod: "GAB", d: "dispositivo123456" };
   eq("9 pago Zelle en Holded", W.H.pays.find(p => p.amount === 400).date, sec(fz)); eq("9 pago efectivo en Holded", W.H.pays.find(p => p.amount === 500).date, sec(hoyCcs));
   const car = W.ctx.cobranzas({ a: "adcob", k: "ADM" }).car;
   eq("9 carpeta Zelle", car.find(p => p.nn === "NE5001").f, sec(fz)); eq("9 carpeta efectivo", car.find(p => p.nn === "NE5002").f, sec(hoyCcs)); }
+
+// ---------- decimales (24 nov 2026): administración cuadra al registrar ----------
+const AJ = "e".repeat(24), TES = [{ id: AJ, name: "Ajustes por redondeo" }];
+// 10) Pagó de más ($192 por $191,82): Zelle $192 y ajuste −$0,18; la nota queda en $0
+{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4265", menosHabiles(1), 191.82);
+  const r = W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000010", n: N1, ze: 192, ab: 192 }) }); eq("10 cobro", r.estado, "ok");
+  const v = W.ctx.cobranzas({ a: "adcob", k: "ADM" }); eq("10 receptor sabe", [v.aj, v.ajc], [1, 1]);
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000010", aj: "1" });
+  si("10 ok", g.reg.ok); eq("10 pagos", W.H.pays.map(p => [p.amount, p.treasury === AJ]), [[192, false], [-0.18, true]]); eq("10 saldada", W.H.notas[N1].paymentsPending, 0);
+  eq("10 hoja", g.cobro.aj, -0.18); si("10 mensaje", /decimales cuadrados/.test(g.reg.msg)); eq("10 registro de ajustes", W.hojas["Ajustes"].v[1][3], -0.18);
+  const v2 = W.ctx.cobranzas({ a: "adcob", k: "ADM" }); si("10 ajuste fuera de la carpeta", !v2.car.some(p => p.m === -0.18) && v2.car.some(p => p.m === 192)); si("10 ajuste no es pago sin dueño", !v2.arch.length); }
+// 11) Pagó de menos ($191 por $191,82): ajuste +$0,82
+{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4266", menosHabiles(1), 191.82);
+  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000011", n: N1, ef: 191, ab: 191 }) });
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000011", aj: "1" });
+  eq("11 pagos", W.H.pays.map(p => p.amount), [191, 0.82]); eq("11 saldada", W.H.notas[N1].paymentsPending, 0); }
+// 12) Sin cuadrar: se registra lo que entró y la nota queda como Holded la deje
+{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4267", menosHabiles(1), 191.82);
+  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000012", n: N1, ef: 191, ab: 191 }) });
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000012" }); si("12 ok", g.reg.ok); eq("12 un pago", W.H.pays.length, 1); eq("12 quedan", W.H.notas[N1].paymentsPending, 0.82); }
+// 13) Sin la cuenta en Holded: se registra el pago y avisa que falta la cuenta
+{ const W = mundo(); W.H.notas[N1] = nota(N1, "NE4268", menosHabiles(1), 191.82);
+  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000013", n: N1, ef: 191, ab: 191 }) });
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000013", aj: "1" });
+  si("13 registrado", g.reg.ok); eq("13 un pago", W.H.pays.length, 1); si("13 aviso", /crea en Holded la cuenta/.test(g.reg.aviso)); }
+// 14) Holded no acepta el ajuste negativo: el pago queda, la nota queda a favor y se avisa
+{ const W = mundo({ tesoreria: TES, negRompe: true }); W.H.notas[N1] = nota(N1, "NE4269", menosHabiles(1), 191.82);
+  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000014", n: N1, ze: 192, ab: 192 }) });
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000014", aj: "1" });
+  si("14 registrado", g.reg.ok); eq("14 a favor", W.H.notas[N1].paymentsPending, -0.18); si("14 aviso", /no aceptó el ajuste/.test(g.reg.aviso)); }
+// 15) Nota que quedó con centavos (sin cobro): «Cuadrar» desde administración
+{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4270", menosHabiles(1), 100.4, { paymentsTotal: 100, paymentsPending: 0.4 });
+  const g = W.ctx.cobranzas({ a: "adaj", k: "ADM", n: N1 }); eq("15 ok", g.estado, "ok"); eq("15 ajuste", W.H.pays.map(p => p.amount), [0.4]); eq("15 saldada", W.H.notas[N1].paymentsPending, 0);
+  eq("15 sin llave", W.ctx.cobranzas({ a: "adaj", k: "x", n: N1 }).estado, "no"); }
+// 16) Cobro de administración que se pasa por más de $0,50: solo se acepta si cuadra
+{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4271", menosHabiles(1), 98.3);
+  const a = W.ctx.cobranzas({ a: "cobro", ...V, k: "ADM", x: x({ id: "uid-00000016", n: N1, ef: 100, ab: 100 }) }); eq("16 sin cuadrar no", a.estado, "error");
+  const b = W.ctx.cobranzas({ a: "cobro", ...V, k: "ADM", x: x({ id: "uid-00000017", n: N1, ef: 100, ab: 100, aj: "1" }) });
+  eq("16 ok", b.estado, "ok"); eq("16 pagos", W.H.pays.map(p => p.amount), [100, -1.7]); eq("16 saldada", W.H.notas[N1].paymentsPending, 0); }
+// 18) Con otro cobro de la misma nota por registrar no se cuadra (se comería ese cobro)
+{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4273", menosHabiles(1), 300);
+  W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000019", n: N1, ef: 100, ab: 100 }) }); W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000020", n: N1, ze: 199.7, ab: 199.7 }) });
+  const g = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000019", aj: "1" }); si("18 registrado", g.reg.ok); eq("18 sin ajuste", W.H.pays.length, 1); si("18 aviso", /otro cobro por registrar/.test(g.reg.aviso));
+  eq("18 adaj detenido", W.ctx.cobranzas({ a: "adaj", k: "ADM", n: N1 }).estado, "error");
+  const g2 = W.ctx.cobranzas({ a: "adreg", k: "ADM", id: "uid-00000020", aj: "1" }); eq("18 ahora sí", W.H.pays.map(p => p.amount), [100, 199.7, 0.3]); eq("18 saldada", W.H.notas[N1].paymentsPending, 0); }
+// 17) Un vendedor no puede pedir que se cuadre
+{ const W = mundo({ tesoreria: TES }); W.H.notas[N1] = nota(N1, "NE4272", menosHabiles(1), 98.3);
+  eq("17 vendedor tope", W.ctx.cobranzas({ a: "cobro", ...V, x: x({ id: "uid-00000018", n: N1, ef: 100, ab: 100, aj: "1" }) }).estado, "error"); }
 
 console.log(ok + " bien, " + mal + " mal"); if(mal) process.exit(1);
