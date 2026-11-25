@@ -1687,7 +1687,7 @@ function admRegCard(c){
   if(busy) h += `<button class="send" disabled>REGISTRANDO EN HOLDED…</button>`;
   else if(conf) h += `<div class="adcf"><b>¿Registrar en Holded?</b><span>${c.dc > 0 && (c.dce === "automático" || c.dce === "aprobado") && !c.dch ? "Poner " + c.dc + " % de descuento en la nota y registrar " : ""}${falta.map(p => money(p.m) + " en " + esc(p.cta)).join(" + ")}${esc(admAjTxt(aj))} · ${esc(cbFecha2(c.fh || ""))}</span>
       <div class="adbt"><button class="ghost" data-ad="cbno">Cancelar</button><button class="send" data-ad="cbsi" data-id="${esc(c.id)}">SÍ, REGISTRAR</button></div></div>`;
-  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="send dk" data-ad="cbreg" data-id="${esc(c.id)}"${dcPa ? " disabled" : ""}>${soloEf ? "RECIBÍ EL EFECTIVO · REGISTRAR" : hechas.length ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED"}</button></div>`;
+  else h += `<div class="adbt">${admCapBtn(c)}<button class="send dk" data-ad="cbreg" data-id="${esc(c.id)}"${dcPa ? " disabled" : ""}>${soloEf ? "RECIBÍ EL EFECTIVO · REGISTRAR" : hechas.length ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED"}</button></div>`;
   return h + `</article></div>`;
 }
 /* un pago que cubre varias notas: UNA tarjeta; al registrar se anota un pago por cuenta y por nota (cada nota con su monto) */
@@ -1712,7 +1712,7 @@ function admRegGrupo(L){
   if(busy) h += `<button class="send" disabled>REGISTRANDO EN HOLDED…</button>`;
   else if(conf) h += `<div class="adcf"><b>¿Registrar en Holded las ${L.length} notas?</b><span>${L.map(x => esc(x.nn) + ": " + faltan(x).map(p => money(p.m) + " en " + esc(p.cta)).join(" + ") + esc(admAjTxt(admAjInfo(x)))).join(" · ")} · ${esc(cbFecha2(c.fh || ""))}</span>
       <div class="adbt"><button class="ghost" data-ad="cbno">Cancelar</button><button class="send" data-ad="cbsi" data-id="${esc(c.id)}">SÍ, REGISTRAR</button></div></div>`;
-  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="send dk" data-ad="cbreg" data-id="${esc(c.id)}">${L.some(x => (x.reg || []).length) ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED · " + esc(total.toUpperCase())}</button></div>`;
+  else h += `<div class="adbt">${admCapBtn(c)}<button class="send dk" data-ad="cbreg" data-id="${esc(c.id)}">${L.some(x => (x.reg || []).length) ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED · " + esc(total.toUpperCase())}</button></div>`;
   return h + `</article></div>`;
 }
 /* registra las notas del pago una tras otra (el receptor ya sabe registrar cada nota); si una se detiene, se avisa y las demás quedan por registrar */
@@ -1741,8 +1741,8 @@ function admDifCard(c){
   if(pie) h += `<span class="adcs">${esc(pie)}</span>`;
   if(sig) h += `<div class="msg">Holded todavía dice ${esc((c.cr || "").replace(/ \$[\d.,]+/g, ""))}. Corrígelo en Holded, o déjalo así si fue a propósito.</div>`;
   if(rev) h += an ? `<div class="adcf"><b>¿Anular el recibo ${esc(c.rec)}?</b><span>Desaparece de las cuentas por cobrar del vendedor.</span><div class="adbt"><button class="ghost" data-ad="cbno">No</button><button class="send" data-ad="cbanusi" data-id="${esc(c.id)}">SÍ, ANULAR</button></div></div>`
-    : `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}<button class="ghost" data-ad="cbanu" data-id="${esc(c.id)}">Anular</button><button class="send dk" data-ad="cbconf" data-id="${esc(c.id)}">CONFIRMAR ASÍ</button></div>`;
-  else h += `<div class="adbt">${c.cap ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>` : ""}${sig ? `<button class="ghost" data-ad="cbacep" data-id="${esc(c.id)}">Dejar así</button>` : ""}<button class="send dk" data-ad="cbrev" data-id="${esc(c.id)}"${AD.cb.busy === c.id ? " disabled" : ""}>${AD.cb.busy === c.id ? "REVISANDO…" : "YA LO CORREGÍ"}</button></div>`;
+    : `<div class="adbt">${admCapBtn(c)}<button class="ghost" data-ad="cbanu" data-id="${esc(c.id)}">Anular</button><button class="send dk" data-ad="cbconf" data-id="${esc(c.id)}">CONFIRMAR ASÍ</button></div>`;
+  else h += `<div class="adbt">${admCapBtn(c)}${sig ? `<button class="ghost" data-ad="cbacep" data-id="${esc(c.id)}">Dejar así</button>` : ""}<button class="send dk" data-ad="cbrev" data-id="${esc(c.id)}"${AD.cb.busy === c.id ? " disabled" : ""}>${AD.cb.busy === c.id ? "REVISANDO…" : "YA LO CORREGÍ"}</button></div>`;
   return h + `</article></div>`;
 }
 function admArchCard(p){
@@ -1836,6 +1836,21 @@ async function admCobAccion(a, ex, ok){
   if(r && r.estado === "ok"){ if(ok) ok(r); } else if(r) AD.cb.msg.push(r.msg || "No se pudo.");
   await admCobCarga(true); admRender();
 }
+/* ADMIN: ver la captura del cobro; si el vendedor no la subió, administración la puede adjuntar (a=cap con la llave ADMIN) */
+const admCapBtn = c => c.cap
+  ? `<button class="ghost" data-ad="cbcap" data-id="${esc(c.id)}">Ver captura</button>`
+  : `<button class="ghost" data-ad="cbcapadd" data-id="${esc(c.id)}">Sin captura · Adjuntar</button>`;
+async function admAdjuntaCap(id){
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+  inp.addEventListener("change", async () => { const f = inp.files && inp.files[0]; if(!f) return;
+    try{ admToast("Subiendo la captura…"); const a = await cbArchivo(f, 1400, .75);
+      const res = await fetch(SCRIPT_URL, { method:"POST", headers:{ "Content-Type":"text/plain;charset=utf-8" }, redirect:"follow", body:JSON.stringify({ a:"cap", cod:S.cod || (function(){ try{ return localStorage.getItem(LSC) || ""; }catch(e){ return ""; } })(), d:(function(){ try{ return localStorage.getItem("ntx-disp") || ""; }catch(e){ return ""; } })(), k:S.adm || "", x:{ id, i:0 }, tipo:a.tipo, b64:a.b64 }) });
+      const r = JSON.parse(await res.text());
+      if(r && r.estado === "ok"){ admToast("Captura guardada"); await admCobCarga(true); admRender(); }
+      else admToast((r && r.msg) || "No se pudo guardar la captura"); }
+    catch(e){ admToast("Sin conexión: no se pudo subir la captura"); } });
+  inp.click();
+}
 async function admVerCap(id){ capVisor(i => admSrv("adcap", { id, i })); }
 $("vCob").addEventListener("click", e => {
   const a = e.target.closest("[data-ad]"); if(!a || VISTA !== "admin") return; const k = a.dataset.ad, id = a.dataset.id, d = AD.cb.d;
@@ -1849,6 +1864,7 @@ $("vCob").addEventListener("click", e => {
       else if(g.ya) admToast(g.msg || "Ya estaba en Holded");
       else if(g.alto) AD.cb.msg.push(g.msg); }); }
   else if(k === "cbcap") admVerCap(id);
+  else if(k === "cbcapadd") admAdjuntaCap(id);
   else if(k === "ajt"){ (AD.cb.aj = AD.cb.aj || {})[id] = a.checked; admRender(); }
   else if(k === "ajnota"){ AD.cb.busy = id; admCobAccion("adaj", { n:id }, r => admToast("Nota cuadrada · " + (r.msg || ""))); }
   else if(k === "dcap"){ const p = (AD.cb.dcp || {})[id]; admCobAccion("adrev", Object.assign({ id, e:"dcaprobar" }, p ? { p } : {}), () => admToast("Descuento aprobado")); }
