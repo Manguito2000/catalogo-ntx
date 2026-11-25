@@ -170,3 +170,10 @@ Caso: NE4265 (ELÍAS ISTANBOULIE, #elias y #rm) debía $191,82 y el cliente pag�
 **Antes de usarlo**: pegar el `cobranzas_apps_script.gs` nuevo en Apps Script y hacer versión nueva (la cuenta de ajustes ya no se necesita). **Sin probar contra Holded real**: la línea en notas con descuento general (solo en el simulador) y la línea con otros productos en notas que no sean NE4265.
 **Pruebas**: `node herramientas/pruebas_pagina/prueba_redondeo.js` (página) y `receptor_contado.js` (casos 10–20).
 **Armado**: `aplicar_cobranzas.py` ahora exige que `/*FIN-COBRANZAS*/` sea lo último del CSS y del JS (antes el CSS del descuento de contado quedaba fuera de las marcas y se duplicaba en cada aplicación).
+
+## Captura en bolívares anotada como efectivo (25 nov 2026, caso R-0010)
+- **Lector**: si la captura dice la forma de pago (bolívares, Zelle, USDT, Mercantil Panamá) pero no se lee el monto, igual se abre ESE campo (en nota USD, «Nota en USD / pago en Bs») y se cierra el «Efectivo» que sale por defecto (`CB.capEf`).
+- **Al guardar** (`cbCapMal`): si una captura es de bolívares/Zelle/USDT/Mercantil Panamá y el cobro no trae nada en esa forma de pago, no deja guardar y dice dónde escribirlo. Botón «La captura está bien así: dejar guardar» (`CB.capOk`) por si el lector se equivocó de forma de pago.
+- **Corregir (vendedor)**: las capturas del cobro anterior vuelven al formulario (`cbCapTrae`, vía `a=captura`), se leen otra vez y se suben con el recibo nuevo; los montos viejos cuentan como escritos a mano (`cbFDe`). Antes el cobro corregido quedaba sin captura.
+- **ADMIN › Por registrar**: «Corregir forma de pago o monto» (cobros sin nada en Holded y que no sean pago compartido): anula con `adrev&e=anular` y abre «Registrar un cobro» de esa nota con los mismos montos, la nota del vendedor y la captura (vía `adcap`). Al guardar sale un A- y se registra en Holded. Aviso en la tarjeta cuando el cobro es solo efectivo pero trae captura de banco (`ct`). Solo cambia la página: el receptor no se toca.
+- Arreglado el texto «queda en ${money(0)}» de la tarjeta (faltaban las comillas invertidas).

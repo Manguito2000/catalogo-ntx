@@ -341,6 +341,12 @@ function cbCapRecalc(n){
   (CB.capSet || []).forEach(k => { if(!set.has(k) && !man[k]){ CB.f[k] = ""; if(k === "bsb" && !man.bs) CB.f.bs = ""; } });
   set.forEach(k => { if(!man[k]) CB.f[k] = cbCom(r2(S[k])); });
   set.forEach(k => { if(k !== "bsb") CB.on[k] = true; }); if(set.has("mp")) CB.mpOn = true; if(set.has("bsb")){ CB.bsOn = true; CB.on.bs = true; }
+  /* (25 nov 2026) la captura dice la forma de pago aunque no se lea el monto: se abre ESE campo (en nota USD, «Nota en USD / pago en Bs») y se
+     cierra el «Efectivo» que sale por defecto, para que el monto escrito a mano no termine como efectivo (pasó con R-0010) */
+  const mets = new Set(L.map(c => c.lec.met).filter(m => m && m !== "ef"));
+  mets.forEach(m => { if(m === "bs"){ CB.bsOn = true; CB.on.bs = true; } else { CB.on[m] = true; if(m === "mp") CB.mpOn = true; } });
+  if(mets.size && !esB(n) && !man.ef && !(cbNum(CB.f.ef) > 0)){ CB.on.ef = false; CB.capEf = true; }
+  else if(!mets.size && CB.capEf){ delete CB.on.ef; CB.capEf = false; }
   CB.capSet = Array.from(set);
   const conF = L.filter(c => c.lec.fechaDe === "captura" && c.lec.fecha), fb = conF.find(c => c.lec.met === "bs"), fs = conF.map(c => c.lec.fecha).sort();
   if(!man.fp){ if(cbCapSinFecha()) CB.f.fp = ""; else if(fb) CB.f.fp = fb.lec.fecha; else if(fs.length) CB.f.fp = fs[fs.length - 1]; }   // sin fecha en alguna captura: la escribe el vendedor
@@ -355,6 +361,17 @@ function cbCapRecalc(n){
 /* (24 nov 2026) una captura sin fecha legible (o que no se pudo leer) NO toma la fecha de la imagen ni la de hoy: el vendedor escribe el día del pago,
    porque administración la usa para cuadrar con el banco. Sin esa fecha no se guarda el cobro. */
 const cbCapSinFecha = () => (CB.caps || []).some(c => c.est === "error" || (c.lec && c.lec.fechaDe !== "captura"));
+/* (25 nov 2026) la captura es de bolívares (o Zelle, USDT, Mercantil Panamá) pero el cobro no trae nada en esa forma de pago: casi seguro el monto
+   quedó en otro campo (R-0010: pago móvil anotado como efectivo). No se guarda hasta corregirlo, salvo que el vendedor diga que la captura está bien. */
+const CAP_MT = { bs:"bolívares", ze:"Zelle", us:"USDT / USDC", mp:"Mercantil Panamá" };
+function cbCapMal(n, c){
+  if(CB.capOk || cbCapLeyendo()) return "";
+  const mets = Array.from(new Set((CB.caps || []).filter(k => k.lec && k.lec.met && k.lec.met !== "ef").map(k => k.lec.met)));
+  const falta = mets.filter(m => m === "bs" ? !(c.bs > 0 || cbNum(CB.f.bsb) > 0) : !(Number(c[m]) > 0));
+  if(!falta.length) return "";
+  const dn = falta.indexOf("bs") < 0 ? "" : esB(n) ? " Escríbelo en «Bolívares tasa BCV»." : " Escríbelo en «Nota en USD / pago en Bs»: monto en Bs y la tasa acordada.";
+  return "La captura es de un pago en " + falta.map(m => CAP_MT[m] || m).join(" y ") + ", pero el cobro no trae nada en " + (falta.length > 1 ? "esas formas" : "esa forma") + " de pago" + (c.ef > 0 ? " (lo anotaste como efectivo)" : "") + "." + dn;
+}
 const cbFpOk = () => /^\d{4}-\d{2}-\d{2}$/.test(CB.f.fp || "");
 const cbFpFalta = () => cbCapSinFecha() && !(CB.man && CB.man.fp && cbFpOk());
 const cbFpFutura = () => cbFpOk() && CB.f.fp > cbHoy();
@@ -390,7 +407,25 @@ function cbCapQuita(i){
   const n = cbNotas().find(x => x.id === CB.nota), c = (CB.caps || [])[i]; if(!c) return;
   if(c.url) URL.revokeObjectURL(c.url); CB.caps.splice(i, 1); if(n) cbCapRecalc(n); cobRender();
 }
-const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; CB.on = {}; CB.man = {}; };   // también olvida qué formas de pago se abrieron
+/* (25 nov 2026) al corregir un cobro sus capturas vuelven al formulario: se leen de nuevo y se suben con el recibo nuevo (antes se perdían) */
+async function cbCapTrae(pide, nId){
+  const fs = [];
+  try{ let tot = 1;
+    for(let i = 0; i < Math.min(tot, CAPMAX); i++){ const r = await pide(i); if(!(r && r.estado === "ok" && r.b64)) break; tot = Number(r.n) || 1;
+      const bin = atob(r.b64), u = new Uint8Array(bin.length); for(let j = 0; j < bin.length; j++) u[j] = bin.charCodeAt(j);
+      const tp = r.tipo || "image/jpeg"; fs.push(new File([u], "captura" + (i + 1) + "." + (tp.split("/")[1] || "jpg"), { type:tp })); } }
+  catch(e){}
+  if(fs.length && CB.nota === nId) await cbCapElegida(fs);
+  else if(!fs.length && CB.nota === nId){ CB.err = "No pude traer la captura del cobro anterior: adjúntala de nuevo."; cobRender(); }
+}
+/* los montos del cobro que se corrige: cuentan como escritos a mano (la nueva lectura de la captura no los pisa) */
+function cbFDe(c){
+  const m = v => Number(v) > 0 ? String(v).replace(".", ",") : "";
+  CB.f = Object.assign(cbF0(), { ef:m(c.ef), us:m(c.us), ze:m(c.ze), mp:m(c.mp), bs:m(c.bs), bsb:m(c.bsb), tb:Number(c.tbc) > 0 ? cbCom(Number(c.tbc), 4) : "", ta:m(c.ta), fp:c.fp || "", rf:c.rf || "", dd:m(c.dd), dc:cbDcCont(c) ? m(c.dc) : "", nv:c.nv || "" });
+  CB.man = {}; ["ef", "us", "ze", "mp", "bs", "bsb", "fp", "rf"].forEach(k => { if(CB.f[k]) CB.man[k] = true; });
+  CB.mpOn = Number(c.mp) > 0; CB.bsOn = Number(c.bsb) > 0; CB.tbMan = Number(c.tbc) > 0;
+}
+const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; CB.on = {}; CB.man = {}; CB.capEf = false; CB.capOk = false; };   // también olvida qué formas de pago se abrieron
 function cbCapHtml(){
   const L = CB.caps || [], M = { ze:"Zelle", us:"USDT / USDC", bs:"Bolívares", mp:"Mercantil Panamá" };
   const item = (c, i) => { let st = "";
@@ -664,7 +699,7 @@ function cbFormHtml(){
       ${ed ? "" : `<p class="hint cbins"><b>Adjunta las capturas de los pagos</b> (Zelle, Binance, pago móvil, transferencia): la app llena los montos. Lo que no tenga captura, como el efectivo, escríbelo tú${bcv ? " en dólares BCV. Si paga en divisas, se aplica el descuento" : " en dólares"}.</p>`}
       ${ed && bcv ? `<p class="hint">Nota a tasa BCV: los montos van en dólares BCV.</p>` : ""}
       ${n.fac ? `<p class="hint">${soloIva ? "El neto ya está cobrado. Si el cliente pagó el IVA aparte, anótalo aquí en bolívares." : "Nota facturada: si el pago trae el IVA, anota todo lo que entró; la app separa el neto del IVA."}</p>` : ""}
-      ${ed ? "" : cbCapHtml() + cbFpHtml()}
+      ${ed && (CB.caps || []).length ? `<p class="hint">Las capturas del cobro anterior pasan al recibo nuevo.</p>` : ""}${cbCapHtml() + cbFpHtml()}
       <div class="cbf">${campos}${MU ? "" : cbDcHtml(n, x)}
         <label><span>Referencia o comprobante (opcional)</span><input class="fld" id="cb_rf" data-cb-in="rf" type="text" autocomplete="off" maxlength="120" placeholder="Últimos dígitos, nombre del banco…" value="${esc(CB.f.rf)}"></label>
         ${MU ? "" : `<label class="w2"><span>Nota para administración (opcional)</span><textarea class="fld cbnv" id="cb_nv" data-cb-in="nv" rows="2" maxlength="300" placeholder="Ej.: le di el 15 % porque pagó casi de contado; el cliente pasa a retirar…">${esc(CB.f.nv)}</textarea></label>`}</div>
@@ -882,8 +917,10 @@ function cbSum(){
     s.innerHTML = s.innerHTML.replace('<div class="big">', `<div><span>IVA ${IVAP} % aparte</span><b class="num">${cbM(iv.iva, n)}</b></div>` + (iv.rt ? `<div><span>Retención ${iv.rt} % del IVA</span><b class="num">−${cbM(iv.ret, n)}</b></div>` : "") +
       `<div><span>IVA que paga el cliente</span><b class="num">${cbM(iv.paga, n)}</b></div><div class="big">`); }
   const fpF = cbFpFalta(), fpX = cbFpFutura(); const fx = $("cb_fpx"); if(fx && fx.closest){ const w = fx.closest(".cbfpx"); if(w) w.classList.toggle("ok", !fpF); }
-  $("cbGo").disabled = c.nom <= 0 || sobra || sinTasa || sinTasaB || fpF || fpX || CB.busy || cbCapLeyendo(); $("cbGo").textContent = CB.busy ? "GUARDANDO…" : cbCapLeyendo() ? "LEYENDO LAS CAPTURAS…" : x.multi ? "CONTINUAR" : CB.edit ? "GUARDAR CORRECCIÓN" : "GUARDAR COBRO";
+  const capMal = c.nom > 0 ? cbCapMal(n, c) : "";
+  $("cbGo").disabled = c.nom <= 0 || sobra || sinTasa || sinTasaB || fpF || fpX || CB.busy || cbCapLeyendo() || !!capMal; $("cbGo").textContent = CB.busy ? "GUARDANDO…" : cbCapLeyendo() ? "LEYENDO LAS CAPTURAS…" : x.multi ? "CONTINUAR" : CB.edit ? "GUARDAR CORRECCIÓN" : "GUARDAR COBRO";
   $("cbErr").textContent = fpF && c.nom > 0 && !cbCapLeyendo() ? "La captura no tiene fecha: escribe la fecha del pago." : fpX ? "La fecha del pago no puede ser después de hoy." : sobra ? (n.fac ? "Eso es más que el neto (" + cbM(x.saldo, n) + ") y el IVA (" + cbM(cbIvaPend(n), n) + ") que faltan." : "Eso es más de lo que falta de la nota (" + cbM(x.saldo, n) + ").") : sinTasa ? "Escribe la tasa acordada con el cliente: es obligatoria cuando una nota en USD se paga en bolívares." : sinTasaB ? "Escribe la tasa BCV del día del pago para pasar los bolívares a dólares BCV." : CB.err;
+  if(capMal && !$("cbErr").textContent) $("cbErr").innerHTML = esc(capMal) + `<br><button type="button" class="txt" data-cb="capok">La captura está bien así: dejar guardar</button>`;
 }
 function cbOkHtml(){
   const c0 = CB.ok.cobro, c = cbUnido(c0), n = cbNotas().find(x => x.id === c.n), sc = n ? cbVisible(n).saldo : 0;
@@ -987,7 +1024,7 @@ function cobAbre(){ ocrTibio(); cbLoad(); if(CB.multi) cbMultiCierra(); CB.nota 
 async function cbGuardar(){
   const x = cbSaldoNota(); if(!x || CB.busy) return; const c = cbCalc(x.n, CB.f, x.saldo);
   const ajG = cbAjAdm(x, r2(x.saldo - c.bv));
-  if(cbFpFalta() || cbFpFutura()) return;
+  if(cbFpFalta() || cbFpFutura() || cbCapMal(x.n, c)) return;
   if(c.nom <= 0 || (c.bv > x.saldo + 0.5 && !ajG) || c.iv > cbIvaPend(x.n) + 0.5 || (!esB(x.n) && c.bs > 0 && !(cbNum(CB.f.ta) > 0))) return;
   const det = cbIvaDetecta(x.n, x.saldo, c), caps = (CB.caps || []).slice(), lecs = caps.filter(k => k.lec).map(k => k.lec);   // se calcula antes de guardar: después el cobro ya cuenta en el IVA recibido
   CB.err = ""; CB.busy = true; cbSum();
@@ -1556,7 +1593,7 @@ async function rcAvisar(id){
 /* ---------- ADMIN › Cobros (parte 3): por registrar en Holded, con diferencia, por anotar en carpeta y cobro de administración (A-) ----------
    Datos: a=adcob (el receptor concilia al momento con Holded). Registrar = a=adreg (el receptor escribe el pago en Holded, uno por cuenta).
    El cobro de administración reutiliza el formulario del vendedor (lector de capturas incluido) con la nota en CB.adNota. */
-AD.cb = { d:null, err:"", t:0, cargando:false, sub:"reg", conf:"", busy:"", msg:[], pick:false, q:"", sigue:{}, anular:"", hechos:{}, dcp:{} };
+AD.cb = { d:null, err:"", t:0, cargando:false, sub:"reg", conf:"", busy:"", msg:[], pick:false, q:"", sigue:{}, anular:"", corr:"", hechos:{}, dcp:{} };
 const admCobRegs = d => (d.cob || []).filter(c => c.est === "cobrado" || (c.est === "revisar" && (/^Lleva/.test(c.obs || "") || (c.reg || []).length)));
 const admCobDifs = d => (d.cob || []).filter(c => admCobRegs(d).indexOf(c) < 0);
 /* los cobros de un mismo pago (varias notas) se ven como UNA tarjeta por registrar */
@@ -1656,7 +1693,7 @@ function admAjInfo(c){
 }
 function admAjHtml(c, a, grupo){
   if(!a || (grupo && Math.abs(a.dif) < 0.01)) return "";
-  const nh = `<div class="adnh">${grupo ? esc(c.nn) + " · " : ""}En Holded debe <b class="num">${money(c.npen)}</b> · ${a.dif >= 0.01 ? `al registrar quedarían <b class="num">${money(a.dif)}</b>` : a.dif <= -0.01 ? `el cobro se pasa por <b class="num">${money(-a.dif)}</b>` : "queda en <b>${money(0)}</b>"}</div>`;
+  const nh = `<div class="adnh">${grupo ? esc(c.nn) + " · " : ""}En Holded debe <b class="num">${money(c.npen)}</b> · ${a.dif >= 0.01 ? `al registrar quedarían <b class="num">${money(a.dif)}</b>` : a.dif <= -0.01 ? `el cobro se pasa por <b class="num">${money(-a.dif)}</b>` : `queda en <b class="num">${money(0)}</b>`}</div>`;
   if(!a.puede) return nh + (a.otro && Math.abs(a.dif) >= 0.01 ? `<small class="hint">Para cuadrar los decimales, registra primero ${esc(a.otro.rec || "el otro cobro")}.</small>` : a.grande ? `<small class="hint">La diferencia pasa de ${money(AJ_LINEA_MAX)}: no se cuadra. ${a.dif > 0 ? "El pago se registra tal cual y la nota queda con saldo pendiente." : "Corrige el monto del cobro: no se puede registrar de más."}</small>` : "");
   return nh + `<label class="adaj"><input type="checkbox" data-ad="ajt" data-id="${esc(c.id)}"${a.on ? " checked" : ""}><span><b>Cuadrar decimales${grupo ? " de " + esc(c.nn) : ""}</b><small>La nota pasa a ${money(r2(c.npen - a.dif))} con una línea «Ajuste por redondeo» de ${a.dif > 0 ? "−" : "+"}${money(Math.abs(a.dif))}; el pago entra completo a su cuenta</small></span></label>`;
 }
@@ -1673,6 +1710,7 @@ function admRegCard(c){
   const soloEf = partes.length === 1 && partes[0].k === "ef", suma = r2(falta.reduce((s, p) => s + p.m, 0)), ret = (AD.ret || []).find(r => r.n === c.n);
   const av = String(c.av || "").split(" · ").filter(Boolean);
   if(c.est === "revisar" && c.obs) av.unshift(c.obs);
+  if(soloEf && Number(c.cap) > 0 && String(c.ct || "").replace(/,/g, "").trim()) av.unshift("La captura es de un pago por banco (bolívares, Zelle o similar), pero el cobro dice efectivo. Revísala y, si hace falta, toca «Corregir forma de pago o monto».");
   if(c.tb === "b" && !(c.nd > 0) && c.npen != null) av.push("La nota aún no tiene el " + DBCV + " % en Holded: quedará un saldo hasta que se lo pongas.");
   const aj = admAjInfo(c);
   if(c.npen != null && suma > c.npen + 0.5 && !(aj && aj.on)) av.push("En Holded la nota solo tiene " + money(c.npen) + " pendientes.");
@@ -1687,7 +1725,10 @@ function admRegCard(c){
   if(busy) h += `<button class="send" disabled>REGISTRANDO EN HOLDED…</button>`;
   else if(conf) h += `<div class="adcf"><b>¿Registrar en Holded?</b><span>${c.dc > 0 && (c.dce === "automático" || c.dce === "aprobado") && !c.dch ? "Poner " + c.dc + " % de descuento en la nota y registrar " : ""}${falta.map(p => money(p.m) + " en " + esc(p.cta)).join(" + ")}${esc(admAjTxt(aj))} · ${esc(cbFecha2(c.fh || ""))}</span>
       <div class="adbt"><button class="ghost" data-ad="cbno">Cancelar</button><button class="send" data-ad="cbsi" data-id="${esc(c.id)}">SÍ, REGISTRAR</button></div></div>`;
-  else h += `<div class="adbt">${admCapBtn(c)}<button class="send dk" data-ad="cbreg" data-id="${esc(c.id)}"${dcPa ? " disabled" : ""}>${soloEf ? "RECIBÍ EL EFECTIVO · REGISTRAR" : hechas.length ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED"}</button></div>`;
+  else if(AD.cb.corr === c.id) h += `<div class="adcf"><b>¿Corregir ${esc(c.rec || "este cobro")}?</b><span>Se anula y se abre el formulario de la nota ${esc(c.nn || "")} con los mismos montos y ${Number(c.cap) > 0 ? "la misma captura" : "sin captura"}, para que lo arregles (p. ej. pasar el efectivo a bolívares). Al guardar sale un recibo A- nuevo y se registra en Holded de una vez.</span>
+      <div class="adbt"><button class="ghost" data-ad="cbno">No</button><button class="send" data-ad="cbcorrsi" data-id="${esc(c.id)}">SÍ, CORREGIR</button></div></div>`;
+  else h += `<div class="adbt">${admCapBtn(c)}<button class="send dk" data-ad="cbreg" data-id="${esc(c.id)}"${dcPa ? " disabled" : ""}>${soloEf ? "RECIBÍ EL EFECTIVO · REGISTRAR" : hechas.length ? "REGISTRAR LO QUE FALTA" : "REGISTRAR EN HOLDED"}</button></div>` +
+    (!hechas.length && !c.gr ? `<div class="adbt"><button class="ghost" data-ad="cbcorr" data-id="${esc(c.id)}">Corregir forma de pago o monto</button></div>` : "");
   return h + `</article></div>`;
 }
 /* un pago que cubre varias notas: UNA tarjeta; al registrar se anota un pago por cuenta y por nota (cada nota con su monto) */
@@ -1832,7 +1873,7 @@ function admRegOk(){
 async function admCobAccion(a, ex, ok){
   AD.cb.busy = ex.id || ""; admRender();
   let r = null; try{ r = await admSrv(a, ex); }catch(e){ AD.cb.msg.push("Sin conexión: no se hizo. Intenta de nuevo."); }
-  AD.cb.busy = ""; AD.cb.conf = ""; AD.cb.anular = "";
+  AD.cb.busy = ""; AD.cb.conf = ""; AD.cb.anular = ""; AD.cb.corr = "";
   if(r && r.estado === "ok"){ if(ok) ok(r); } else if(r) AD.cb.msg.push(r.msg || "No se pudo.");
   await admCobCarga(true); admRender();
 }
@@ -1851,12 +1892,25 @@ async function admAdjuntaCap(id){
     catch(e){ admToast("Sin conexión: no se pudo subir la captura"); } });
   inp.click();
 }
+/* (25 nov 2026) corregir un cobro por registrar desde ADMIN: se anula y se abre «Registrar un cobro» de esa nota con sus montos y su captura */
+async function admCorrige(c){
+  AD.cb.busy = c.id; admRender();
+  let r = null; try{ r = await admSrv("adrev", { id:c.id, e:"anular" }); }catch(e){}
+  AD.cb.busy = ""; AD.cb.corr = "";
+  if(!(r && r.estado === "ok")){ AD.cb.msg.push((r && r.msg) || "Sin conexión: no se pudo corregir. Intenta de nuevo."); admRender(); return; }
+  await admCobCarga(true);
+  if(!((AD.cb.d && AD.cb.d.np) || []).some(n => n.id === c.n)){ AD.cb.msg.push("Anulé " + (c.rec || "el cobro") + ", pero la nota " + (c.nn || "") + " no salió como pendiente. Regístralo con «+ Registrar un cobro»."); admRender(); return; }
+  admNotaAbre(c.n); cbFDe(c); admRender(); admToast((c.rec || "Cobro") + " anulado: corrige y guarda");
+  if(Number(c.cap) > 0) cbCapTrae(i => admSrv("adcap", { id:c.id, i }), c.n);
+}
 async function admVerCap(id){ capVisor(i => admSrv("adcap", { id, i })); }
 $("vCob").addEventListener("click", e => {
   const a = e.target.closest("[data-ad]"); if(!a || VISTA !== "admin") return; const k = a.dataset.ad, id = a.dataset.id, d = AD.cb.d;
   if(k === "cbsub"){ AD.cb.sub = a.dataset.k; AD.cb.conf = ""; admRender(); }
   else if(k === "cbreg"){ AD.cb.conf = id; AD.cb.anular = ""; admRender(); }
-  else if(k === "cbno"){ AD.cb.conf = ""; AD.cb.anular = ""; admRender(); }
+  else if(k === "cbno"){ AD.cb.conf = ""; AD.cb.anular = ""; AD.cb.corr = ""; admRender(); }
+  else if(k === "cbcorr"){ AD.cb.corr = id; AD.cb.conf = ""; AD.cb.anular = ""; admRender(); }
+  else if(k === "cbcorrsi"){ const c = d && d.cob.find(x => x.id === id); if(c) admCorrige(c); }
   else if(k === "cbsi"){ const c = d && d.cob.find(x => x.id === id);
     if(c && c.gr && admAgrupa(admCobRegs(d)).some(g => g.length > 1 && g.some(x => x.id === id))){ admRegGrupoAcc(c); return; }
     admCobAccion("adreg", Object.assign({ id }, admAjEx(c)), r => { const g = r.reg || {};
@@ -1921,6 +1975,7 @@ $("vCob").addEventListener("click", async e => {
   else if(k === "bson"){ CB.bsOn = true; cobRender(); const i = $("cb_bsb"); if(i) i.focus(); }
   else if(k === "bsoff"){ const n = cbNotas().find(x => x.id === CB.nota); CB.bsOn = false; CB.f.bsb = ""; if(!(n && esB(n))){ CB.f.bs = ""; CB.f.ta = ""; } cobRender(); }
   else if(k === "capdel") cbCapQuita(Number(a.dataset.i));
+  else if(k === "capok"){ CB.capOk = true; cbSum(); }
   else if(k === "fill"){
     const x = cbSaldoNota(); if(!x) return; const key = a.dataset.k, f = Object.assign({}, CB.f, { [key]:"" }), otros = cbCalc(x.n, f), rest = Math.max(0, x.saldo - otros.bv);
     let v = rest;
@@ -1938,9 +1993,9 @@ $("vCob").addEventListener("click", async e => {
   else if(k === "subir"){ const f = $("cbFile"); if(f) f.click(); }
   else if(k === "share") cbShare(a.dataset.id);
   else if(k === "edit"){
-    const c = cbCobros().find(x => x.id === a.dataset.id); if(!c) return; const m = v => v ? String(v).replace(".", ",") : "";
-    CB.nota = c.n; CB.edit = c.id; CB.del = null; CB.err = ""; cbCapLimpia(); CB.mpOn = Number(c.mp) > 0; CB.bsOn = Number(c.bsb) > 0; CB.tbMan = Number(c.tbc) > 0;
-    CB.f = { ef:m(c.ef), us:m(c.us), ze:m(c.ze), mp:m(c.mp), bs:m(c.bs), bsb:m(c.bsb), tb:Number(c.tbc) > 0 ? cbCom(Number(c.tbc), 4) : "", ta:m(c.ta), fp:c.fp || "", rf:c.rf || "", dd:Number(c.dd) > 0 ? m(c.dd) : "", dc:cbDcCont(c) ? m(c.dc) : "", nv:c.nv || "" }; cobRender(); top();
+    const c = cbCobros().find(x => x.id === a.dataset.id); if(!c) return;
+    CB.nota = c.n; CB.edit = c.id; CB.del = null; CB.err = ""; cbCapLimpia(); cbFDe(c); cobRender(); top();
+    if(Number(c.cap) > 0 && c.rec) cbCapTrae(i => cbSrv("captura", { r:c.rec, i }), c.n);
   }
   else if(k === "editx"){ CB.edit = null; CB.f = cbF0(); CB.err = ""; cobRender(); }
   else if(k === "avok"){ CB.avisos.splice(Number(a.dataset.i), 1); cobRender(); }
