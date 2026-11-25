@@ -18,6 +18,13 @@ Hecho (21 nov 2026): las pantallas de la bandeja en la pestaña ADMIN del portal
   - CLIENTE NUEVO que sigue como CLIENTE NUEVO en la nota → aviso.
 - Notas creadas por API (Claude, skill facturar-ntx) no tienen enlace con el pedido: se enlazan con la etiqueta del número de origen en minúsculas (`so260025`, `e260009`). Esas no necesitan envío (la nota por API baja el stock).
 
+## Cliente nuevo: teléfono y foto del RIF (25 nov 2026)
+- Portal (`rif_pagina.js/.css` + `aplicar_rif.py`, después de `aplicar_jalar.py`): con «Cliente nuevo» pide nombre, **teléfono** (10+ dígitos) y **foto del RIF** (cámara o galería; también PDF). Los tres son obligatorios, salvo que el vendedor marque la casilla **«El cliente ya existe en el sistema»** (decisión de Mango, 25 nov 2026: la cartera en Holded puede tener errores de asignación de vendedor). Con la casilla, el pedido lleva `ye:1`, no pide teléfono ni foto, y las notas dicen «EL VENDEDOR DICE QUE EL CLIENTE YA EXISTE (revisar ficha y vendedor asignado)». La foto se reduce en el teléfono (1400 px, JPEG) y queda en `localStorage` (`ntx-rif`; los pedidos en espera guardan la suya).
+- El pedido (`?p=`) lleva `tl` (teléfono) y `rf:1`. Al tocar ENVIAR, la foto pasa a la cola `ntx-rif-cola` y sube por POST `{a:"rif", cod, d, x:{id del pedido, cn}, tipo, b64}`; sin señal se reintenta (al abrir la página y al volver la conexión; se descarta tras 8 fallos).
+- Receptor: `doPost` (cobranzas) → `pdRif` (pedidos): guarda en Drive «RIF clientes nuevos NTX» y adjunta al pedido/presupuesto en Holded con V1 `POST documents/<salesorder|estimate>/<id>/attach` (multipart, campo `file`; probado el 25 nov 2026). Pedido y foto llegan en cualquier orden: propiedad `RIF_<id>`; `pdCiclo` reintenta y, si el pedido quedó en «revisar» o nunca llegó, manda un correo a Mango con el enlace de Drive.
+- Notas del documento: «CLIENTE NUEVO: nombre · Tel: … · RIF adjunto». Descripción: «CLIENTE NUEVO: nombre · Tel … · 📝 nota». El correo del pedido dice el teléfono y dónde está la foto.
+- La API V1 no adjunta a contactos (probado: 404). Al registrar al cliente, copiar el RIF a su ficha con la API nueva o dejarlo en el pedido.
+
 ## Rutas nuevas del receptor (GET, mismo /exec)
 - `?p=<pedido>` (sin `a`): lo de arriba. Devuelve HTML para el vendedor.
 - `?a=bandeja&k=<ADMIN>[&f=1]` → JSON (caché 60 s; `f=1` la salta):

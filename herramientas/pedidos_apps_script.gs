@@ -18,6 +18,8 @@
 //      descuento (que la nota no tenga menos descuento que el pedido) y la nota del vendedor (que los códigos que pidió estén).
 //  - ?a=bandeja&k=ADMIN: datos de la bandeja de Mango (pedidos y presupuestos abiertos, en cola, por revisar, hechos 7 días).
 //  - ?a=bacc&k=ADMIN&...: acciones de la bandeja (ocultar / mostrar, marcar revisado).
+//  - POST {a:"rif"} (25 nov 2026): foto del RIF de un cliente nuevo (o, en su lugar, la marca ye=1 «el cliente ya existe»). doPost (cobranzas) la pasa a pdRif: se guarda en Drive y se adjunta
+//    al pedido o presupuesto en Holded. El teléfono del cliente nuevo viaja en el pedido (tl) y queda en las notas y la descripción.
 
 var PD_FICHAS = {                 // sha256 de la ficha k de cada vendedor -> tag (la ficha viaja en cada pedido)
   "458b20a55ec125ffba3970ce1bb62a0d6b4e94b9c49abb1926335622d063e172": "elias",
@@ -84,6 +86,7 @@ function pdOrden(d) {
   var pr = String(d.pr || "").split(",");
   return {
     id: String(d.id), t: d.t, ci: String(d.ci || ""), cn: String(d.cn || "").trim(), nm: String(d.nm || ""),
+    tl: String(d.tl || "").replace(/[^0-9+()\/ -]/g, "").trim().slice(0, 30), rf: d.rf == 1, ye: d.ye == 1,
     tipo: d.tp === "q" ? "presupuesto" : "pedido", tarifa: String(d.tf || ""), desc: d.d == null ? 0 : Number(d.d), contado: d.c == 1, nota: String(d.n || "").trim(),
     lineas: String(d.l || "").split(",").filter(String).map(function (x, i) {
       var j = x.lastIndexOf("*");
@@ -113,8 +116,9 @@ function pdProcesar(d) {
     if (rp.codigo !== 200 && rp.codigo !== 201) throw pdTemporal(rp);
     var id = rp.datos && rp.datos.id;
     if (!id) return out({ estado: "revisar", obs: "Holded no devolvió el documento: " + JSON.stringify(rp.datos).slice(0, 200) });
-    var chk = pdComprobar(tipo, id, v);
-    return out({ estado: "holded", doc: chk.num, docId: id, total: chk.total, obs: ["Stock confirmado. Total " + din(chk.total) + "."].concat(v.avisos, chk.avisos).join(" ") });
+    var chk = pdComprobar(tipo, id, v), rif = "";
+    try { rif = pdRifDoc(o.id, tipo, id); } catch (eR) {}
+    return out({ estado: "holded", doc: chk.num, docId: id, total: chk.total, obs: ["Stock confirmado. Total " + din(chk.total) + "."].concat(v.avisos, chk.avisos, rif ? [rif] : []).join(" ") });
   } catch (e) {
     if (e && e.temporal) return out({ estado: "cola", obs: "Holded no respondió (" + e.codigo + "); se reintenta solo." });
     return out({ estado: "revisar", obs: "Error: " + String(e.message || e).slice(0, 200) });
@@ -150,13 +154,14 @@ function pdValidar(o, idx, cont, tag, vend, ahora) {
   var partes = ["Pedido desde Pedidos NTX", "Vendedor: " + (vend || tag)];
   if (o.tarifa === "bcv") partes.push("TARIFA BCV");
   if (desc > 0 && !/cr[eé]dito/i.test(o.nota)) o.contado = true; if (o.contado) partes.push("Pago de contado " + desc + "%"); else if (desc > 0) partes.push("Descuento " + desc + "%");
-  if (nuevo) partes.push("CLIENTE NUEVO: " + o.cn + " (falta crear su ficha: RIF y teléfono llegan por WhatsApp)");
+  if (nuevo) partes.push("CLIENTE NUEVO: " + o.cn + (o.ye ? " · EL VENDEDOR DICE QUE EL CLIENTE YA EXISTE (revisar ficha y vendedor asignado)" : "") +
+    (o.tl ? " · Tel: " + o.tl : "") + (o.rf ? " · RIF adjunto" : "") + (!o.ye && !o.tl && !o.rf ? " (falta crear su ficha: RIF y teléfono llegan por WhatsApp)" : ""));
   if (o.nota) partes.push("Nota: " + o.nota);
   partes.push("Ref " + o.id);
   var body = { contactId: o.ci, date: ahora, notes: partes.join(" · "), items: items };
   if (!o.contado) body.dueDate = ahora + PD.credito * 86400;
   var dv = "";
-  if (nuevo) dv = "CLIENTE NUEVO: " + o.cn + (o.nota ? " · 📝 " + o.nota : "");
+  if (nuevo) dv = "CLIENTE NUEVO: " + o.cn + (o.ye ? " · ⚠ ya existe según el vendedor" : "") + (o.tl ? " · Tel " + o.tl : "") + (o.nota ? " · 📝 " + o.nota : "");
   else if (o.nota) dv = "📝 NOTA DE " + String(vend || tag).toUpperCase() + ": " + o.nota;
   if (dv) body.desc = dv.length > 250 ? dv.slice(0, 249) + "…" : dv;
   return { ok: true, body: body, esperado: Math.round(esperado * 100) / 100, avisos: avisos };
@@ -193,6 +198,9 @@ function pdCorreo(d, p, r) {
     " · " + (r.cliente || o.cn || o.nm) + " · " + (r.vend || "?");          // no empieza con "PEDIDO NTX": la tarea vieja no lo toma
   var color = r.estado === "holded" ? "#1E7B34" : r.estado === "cola" ? "#8A6100" : "#B3261E";
   var obs = r.estado === "holded" && r.obs && r.obs.indexOf("Stock confirmado.") === 0 ? r.obs.replace(/^Stock confirmado\. Total [^ ]+\.\s*/, "") : "";
+  if (o.cn) obs = [obs.replace(/\s*RIF adjunto en Holded\.|\s*RIF: se adjunta en unos minutos\./, ""), "Cliente nuevo: " + o.cn + " · " +
+    (o.ye ? "el vendedor dice que el cliente YA EXISTE en Holded: revisa su ficha y a qué vendedor está asignado" :
+    (o.tl ? "Tel " + o.tl : "sin teléfono") + " · " + (o.rf ? (r.estado === "holded" ? "la foto del RIF va adjunta al documento en Holded" : "la foto del RIF queda en Drive (carpeta «RIF clientes nuevos NTX»)") : "sin foto del RIF"))].filter(String).join(" · ");
   MailApp.sendEmail({ to: destinatarios(), subject: asunto, name: "Portal de ventas NTX",
     body: cab + (obs ? "\n" + obs : "") + "\n\n" + c.texto,
     htmlBody: '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto 10px;background:' + color + ';color:#fff;border-radius:10px;padding:10px 14px;font-weight:700">' +
@@ -214,6 +222,7 @@ function pdCiclo() {
     try { res.push(pdReintentar()); } catch (e) { res.push("cola: " + e.message); } finally { lock.releaseLock(); }
   }
   try { res.push(pdRevisarNotas(false)); } catch (e2) { res.push("notas: " + e2.message); }
+  try { res.push(pdRifPendientes()); } catch (e3) { res.push("rif: " + e3.message); }
   return res.join(" · ");
 }
 function pdReintentar() {
@@ -472,6 +481,83 @@ function pdOcultos() {
   var o; try { o = JSON.parse(PropertiesService.getScriptProperties().getProperty("PD_OCULTOS") || "{}"); } catch (e) { o = {}; }
   var lim = Math.floor(Date.now() / 1000) - 120 * 86400; for (var k in o) if (o[k] < lim) delete o[k];
   return o;
+}
+
+/* ---------- 3) foto del RIF de un cliente nuevo (25 nov 2026) ---------- */
+// Llega por POST {a:"rif", cod, d, x:{id, cn}, tipo, b64}; doPost (cobranzas_apps_script.gs) la pasa aquí. La foto ya viene reducida por el teléfono.
+// Se guarda en Drive («RIF clientes nuevos NTX») y se adjunta al pedido o presupuesto en Holded (V1: POST documents/<tipo>/<id>/attach, probado el 25 nov 2026).
+// El pedido (GET ?p=) y la foto (POST) llegan por caminos distintos y en cualquier orden: la propiedad RIF_<id del portal> guarda
+// {f: archivo de Drive, cn, tag, t, doc, tipo, ok, av} hasta que la foto queda adjunta; pdCiclo reintenta lo pendiente.
+function pdRif(b) {
+  var tag = vendedorDe(b); if (!tag) return { estado: "no", msg: "Dispositivo o código no autorizado" };
+  var tipo = String(b.tipo || ""), ext = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" }[tipo];
+  if (!ext) return { estado: "error", msg: "Solo se aceptan fotos o PDF" };
+  var x = b.x || {}, pid = String(x.id || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40);
+  if (pid.length < 10) return { estado: "error", msg: "Falta el pedido" };
+  var bytes = Utilities.base64Decode(String(b.b64 || ""));
+  if (bytes.length < 200 || bytes.length > 6 * 1024 * 1024) return { estado: "error", msg: "La foto está vacía o pesa más de 6 MB" };
+  var props = PropertiesService.getScriptProperties(), lock = LockService.getScriptLock(), info = null;
+  lock.waitLock(25000);
+  try {
+    if (props.getProperty("RIF_" + pid)) return { estado: "ok", repetido: true };
+    var cn = String(x.cn || "").trim().slice(0, 60) || "cliente nuevo";
+    var nombre = "RIF_" + cn.replace(/[^\wÁÉÍÓÚÑáéíóúñ .-]/g, "") + "_" + pdNombre(tag) + "_" + Utilities.formatDate(new Date(), "America/Caracas", "yyyy-MM-dd_HHmm") + "." + ext;
+    var arch = pdRifCarpeta().createFile(Utilities.newBlob(bytes, tipo, nombre));
+    info = { f: arch.getId(), cn: cn, tag: tag, t: Math.floor(Date.now() / 1000), ok: 0 };
+    var fila = pdFilas(pdHoja("Pedidos", PD_COLS), PD_COLS).filter(function (r) { return String(r.pid) === pid; })[0];
+    if (fila && fila.docId) { info.doc = String(fila.docId); info.tipo = String(fila.Tipo) === "presupuesto" ? "estimate" : "salesorder"; }
+    props.setProperty("RIF_" + pid, JSON.stringify(info));
+  } finally { lock.releaseLock(); }
+  if (info.doc) pdRifAdjuntar(pid, info);
+  return { estado: "ok" };
+}
+// Recién creado el documento en Holded (pdProcesar): si la foto ya llegó, se adjunta en el acto. Devuelve el texto para la observación.
+function pdRifDoc(pid, tipo, docId) {
+  var props = PropertiesService.getScriptProperties(), raw = props.getProperty("RIF_" + pid); if (!raw) return "";
+  var info = JSON.parse(raw); info.doc = docId; info.tipo = tipo; props.setProperty("RIF_" + pid, JSON.stringify(info));
+  return pdRifAdjuntar(pid, info) ? "RIF adjunto en Holded." : "RIF: se adjunta en unos minutos.";
+}
+// Sube la foto de Drive al documento de Holded. true si quedó adjunta.
+function pdRifAdjuntar(pid, info) {
+  var k = PropertiesService.getScriptProperties().getProperty("HOLDED_KEY"); if (!k || !info.doc) return false;
+  var cod = 0;
+  try {
+    cod = UrlFetchApp.fetch("https://api.holded.com/api/invoicing/v1/documents/" + info.tipo + "/" + info.doc + "/attach",
+      { method: "post", headers: { key: k }, payload: { file: DriveApp.getFileById(info.f).getBlob() }, muteHttpExceptions: true }).getResponseCode();
+  } catch (e) {}
+  if (cod !== 200 && cod !== 201) return false;
+  info.ok = 1; PropertiesService.getScriptProperties().setProperty("RIF_" + pid, JSON.stringify(info));
+  return true;
+}
+// En pdCiclo: fotos que llegaron antes que el documento o que Holded no aceptó a la primera.
+// Si el pedido quedó en «revisar» (no se creó en Holded) o nunca llegó, avisa a Mango una vez con el enlace de Drive.
+function pdRifPendientes() {
+  var props = PropertiesService.getScriptProperties(), todas = props.getProperties(), ahora = Math.floor(Date.now() / 1000), filas = null, n = 0;
+  Object.keys(todas).forEach(function (p) {
+    if (p.indexOf("RIF_") !== 0) return;
+    var pid = p.slice(4), info; try { info = JSON.parse(todas[p]); } catch (e) { return; }
+    if (info.ok || info.av) { if (ahora - info.t > 30 * 86400) props.deleteProperty(p); return; }
+    if (!filas) filas = pdFilas(pdHoja("Pedidos", PD_COLS), PD_COLS);
+    var r = filas.filter(function (x) { return String(x.pid) === pid; })[0];
+    if (!info.doc && r && r.docId) { info.doc = String(r.docId); info.tipo = String(r.Tipo) === "presupuesto" ? "estimate" : "salesorder"; props.setProperty(p, JSON.stringify(info)); }
+    if (info.doc) { if (pdRifAdjuntar(pid, info)) n++; return; }
+    var revisar = r && String(r.Estado) === "revisar" && ahora - info.t > 600, perdido = !r && ahora - info.t > 86400;
+    if (revisar || perdido) {
+      try {
+        MailApp.sendEmail(destinatarios(), "Portal NTX: RIF de cliente nuevo · " + info.cn,
+          "Llegó la foto del RIF de " + info.cn + " (vendedor: " + pdNombre(info.tag) + "), pero " +
+          (revisar ? "su pedido no se creó en Holded (quedó para revisar: " + String(r["Observación"] || "") + ")." : "no llegó ningún pedido de ese cliente.") +
+          "\n\nVer la foto: " + DriveApp.getFileById(info.f).getUrl() + "\n\nTambién está en Drive, en la carpeta «RIF clientes nuevos NTX».");
+      } catch (e) {}
+      info.av = 1; props.setProperty(p, JSON.stringify(info));
+    }
+  });
+  return n + " RIF adjuntados";
+}
+function pdRifCarpeta() {
+  var props = PropertiesService.getScriptProperties(), id = props.getProperty("PD_RIF_DIR");
+  if (id) try { return DriveApp.getFolderById(id); } catch (e) {}
+  var c = DriveApp.createFolder("RIF clientes nuevos NTX"); props.setProperty("PD_RIF_DIR", c.getId()); return c;
 }
 
 /* ---------- Holded, productos y hojas ---------- */

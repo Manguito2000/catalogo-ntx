@@ -707,6 +707,7 @@ function doPost(e) {
     var b = JSON.parse((e && e.postData && e.postData.contents) || "{}");
     if (b.a === "cap") return json(capturaGuardar(b));
     if (b.a === "adcar") return json(adCarpeta(b));                       // ADMIN › Cobros: carpeta física
+    if (b.a === "rif") return json(pdRif(b));                             // foto del RIF de un cliente nuevo (pedidos_apps_script.gs)
     if (b.a !== "ret") return json({ estado: "error", msg: "Acción desconocida" });
     var tag = vendedorDe(b); if (!tag) return json({ estado: "no", msg: "Dispositivo o código no autorizado" });
     var tipo = String(b.tipo || ""), ext = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" }[tipo];

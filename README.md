@@ -12,6 +12,7 @@ Catálogo de motores, aspas, bobinas, carboneras, conectores y relays NTX para v
 - `herramientas/cobranzas_pagina.js/.css` + `aplicar_cobranzas.py`: pestañas Cobranzas y ADMIN (bandeja de pedidos, presupuestos y facturas de Mango). Flujo: `portal.py abrir` → `aplicar_cobranzas.py plano.json V.json` (inyecta también las cuentas que reconoce el lector de capturas) → `aplicar_jalar.py` → `portal.py armar`.
 - `ocr/`: lector de capturas de pago (Tesseract.js) que usa la pestaña Cobranzas en el teléfono del vendedor.
 - `herramientas/aplicar_jalar.py`: agrega «jalar para actualizar» (se aplica sobre el plano antes de armar).
+- `herramientas/aplicar_rif.py` + `rif_pagina.js/.css`: teléfono y foto del RIF del cliente nuevo en el pedido (después de `aplicar_jalar.py`). Ver `herramientas/PEDIDOS.md`.
 - `herramientas/portal.py`: abre `index.html` para editar el catálogo y lo vuelve a armar cifrado.
 - `herramientas/receptor_apps_script.gs`: plantilla del receptor (portero de dispositivos y panel). Los valores secretos no están en este repositorio.
 - `herramientas/pedidos_apps_script.gs`: crea los pedidos del portal directo en Holded, revisa las notas que salen de pedidos (envío, vencimiento, descuento, nota del vendedor) y da los datos de la bandeja de Mango. Ver `herramientas/PEDIDOS.md`.

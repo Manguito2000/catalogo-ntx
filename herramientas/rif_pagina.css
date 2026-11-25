@@ -1,0 +1,14 @@
+/*RIF*/
+.riftel{margin-top:8px}
+.rifb{margin-top:8px}
+.rifv{display:flex;gap:12px;align-items:center;margin-top:8px;padding:10px;border:1.5px dashed var(--line);border-radius:12px}
+.rifv img,.rifpdf{width:72px;height:72px;flex:none;object-fit:cover;border-radius:8px;background:var(--bg)}
+.rifpdf{display:grid;place-items:center;font-weight:800;color:var(--mut)}
+.rifv div{display:grid;gap:2px;min-width:0}
+.rifv small{color:var(--mut);font-weight:400}
+.rifv .txt{justify-self:start;padding:0;margin-top:4px}
+.rifex{display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:10px 12px;background:var(--bg);border-radius:10px;font-weight:700;cursor:pointer}
+.rifex input{width:20px;height:20px;flex:none;margin-top:1px;accent-color:var(--red)}
+.rifex span{display:grid;gap:2px}
+.rifex small{color:var(--mut);font-weight:400}
+/*FIN-RIF*/
