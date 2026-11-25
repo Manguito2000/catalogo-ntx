@@ -351,7 +351,7 @@ function cbCapRecalc(n){
   const conF = L.filter(c => c.lec.fechaDe === "captura" && c.lec.fecha), fb = conF.find(c => c.lec.met === "bs"), fs = conF.map(c => c.lec.fecha).sort();
   if(!man.fp){ if(cbCapSinFecha()) CB.f.fp = ""; else if(fb) CB.f.fp = fb.lec.fecha; else if(fs.length) CB.f.fp = fs[fs.length - 1]; }   // sin fecha en alguna captura: la escribe el vendedor
   if(set.has("bsb") && esB(n) && !CB.tbMan){ const t = cbTasaDe(CB.f.fp); if(t) CB.f.tb = cbCom(t, 4); }
-  if(set.has("bsb") && !man.bs) cbBsCalc(n);
+  if(set.has("bsb") && (!man.bs || CB.bsFix === "usd")) cbBsCalc(n);
   const refs = Array.from(new Set(L.map(c => c.lec.ref).filter(Boolean)));
   if(man.rf){} else if(refs.length) CB.f.rf = refs.join(" · "); else if(CB.capRf && CB.f.rf === CB.capRf) CB.f.rf = "";
   CB.capRf = refs.length ? CB.f.rf : "";
@@ -369,7 +369,7 @@ function cbCapMal(n, c){
   const mets = Array.from(new Set((CB.caps || []).filter(k => k.lec && k.lec.met && k.lec.met !== "ef").map(k => k.lec.met)));
   const falta = mets.filter(m => m === "bs" ? !(c.bs > 0 || cbNum(CB.f.bsb) > 0) : !(Number(c[m]) > 0));
   if(!falta.length) return "";
-  const dn = falta.indexOf("bs") < 0 ? "" : esB(n) ? " Escríbelo en «Bolívares tasa BCV»." : " Escríbelo en «Nota en USD / pago en Bs»: monto en Bs y la tasa acordada.";
+  const dn = falta.indexOf("bs") < 0 ? "" : esB(n) ? " Escríbelo en «Bolívares tasa BCV»." : " Escríbelo en «Nota en USD / pago en Bs»: el monto en Bs y luego «Cubre la nota completa» (o la tasa acordada).";
   return "La captura es de un pago en " + falta.map(m => CAP_MT[m] || m).join(" y ") + ", pero el cobro no trae nada en " + (falta.length > 1 ? "esas formas" : "esa forma") + " de pago" + (c.ef > 0 ? " (lo anotaste como efectivo)" : "") + "." + dn;
 }
 const cbFpOk = () => /^\d{4}-\d{2}-\d{2}$/.test(CB.f.fp || "");
@@ -384,10 +384,16 @@ function cbFpHtml(){
 const cbCapLeyendo = () => OCR.fase === "listo" && (CB.caps || []).some(c => c.est === "leyendo");
 const CAPMAX = 4;
 /* bolívares: monto en Bs ÷ tasa (BCV en notas BCV, la acordada en notas USD) = dólares de la nota */
+/* (25 nov 2026) nota en USD: si el vendedor fijó los dólares («Cubre la nota completa» o «Equivale en $» a mano), la tasa sale sola: Bs ÷ $ (tasa implícita).
+   Si escribió la tasa, los dólares salen de Bs ÷ tasa. CB.bsFix = "usd" | "ta" dice cuál de los dos manda. */
 function cbBsCalc(n){
-  const bsb = cbNum(CB.f.bsb), t = cbNum(esB(n) ? CB.f.tb : CB.f.ta);
+  const bsb = cbNum(CB.f.bsb);
+  if(!esB(n) && CB.bsFix === "usd"){ const d = cbNum(CB.f.bs); if(bsb > 0 && d > 0) CB.f.ta = cbCom(bsb / d, 2); return; }
+  const t = cbNum(esB(n) ? CB.f.tb : CB.f.ta);
   if(bsb > 0 && t > 0) CB.f.bs = cbCom(r2(bsb / t));
 }
+/* lo que falta por cobrar después de las otras formas de pago (en dólares de la nota) */
+function cbResto(x, key){ const f = Object.assign({}, CB.f, { [key]:"" }); return Math.max(0, r2(x.saldo - cbCalc(x.n, f).bv)); }
 async function cbCapElegida(files){
   const n = cbNotas().find(x => x.id === CB.nota); if(!n || !files || !files.length) return;
   CB.caps = CB.caps || [];
@@ -425,7 +431,7 @@ function cbFDe(c){
   CB.man = {}; ["ef", "us", "ze", "mp", "bs", "bsb", "fp", "rf"].forEach(k => { if(CB.f[k]) CB.man[k] = true; });
   CB.mpOn = Number(c.mp) > 0; CB.bsOn = Number(c.bsb) > 0; CB.tbMan = Number(c.tbc) > 0;
 }
-const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; CB.on = {}; CB.man = {}; CB.capEf = false; CB.capOk = false; };   // también olvida qué formas de pago se abrieron
+const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; CB.on = {}; CB.man = {}; CB.capEf = false; CB.capOk = false; CB.bsFix = ""; };   // también olvida qué formas de pago se abrieron
 function cbCapHtml(){
   const L = CB.caps || [], M = { ze:"Zelle", us:"USDT / USDC", bs:"Bolívares", mp:"Mercantil Panamá" };
   const item = (c, i) => { let st = "";
@@ -682,9 +688,10 @@ function cbFormHtml(){
       : `<button type="button" class="txt sub" data-cb="bson">¿Tienes el monto en Bs? Escríbelo en Bs</button>`)
     : `<div class="cbbs cbusd" id="cbBsRow"><div class="w2 cbbsh"><span class="mfn">${mtChip("bs")}<b>Nota en USD / pago en Bs</b></span><button type="button" class="mfx" data-cb="bsoff" aria-label="Quitar el pago en bolívares">×</button></div>
       <label><span>Monto en Bs</span><input class="fld num" id="cb_bsb" data-cb-in="bsb" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f.bsb)}"></label>
-      <label><span>Tasa acordada</span><input class="fld num" id="cb_ta" data-cb-in="ta" type="text" inputmode="decimal" autocomplete="off" placeholder="Bs por $" value="${esc(CB.f.ta)}"></label>
-      <small class="hint w2"><b>La tasa es obligatoria:</b> la que acordaste con el cliente.</small>
       <label><span>Equivale en $</span><input class="fld num" id="cb_bs" data-cb-in="bs" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f.bs)}"></label>
+      <button type="button" class="ghost w2" data-cb="bsfull">Cubre la nota completa</button>
+      <label><span>Tasa</span><input class="fld num" id="cb_ta" data-cb-in="ta" type="text" inputmode="decimal" autocomplete="off" placeholder="Bs por $" value="${esc(CB.f.ta)}"></label>
+      <small class="hint w2" id="cbTaI">Si el pago cubre la nota, toca «Cubre la nota completa»: la tasa sale sola y solo verificas que sea la acordada. Si no, escribe la tasa acordada.</small>
       <label><span>Fecha del pago</span><input class="fld" id="cb_fp" data-cb-in="fp" type="date" value="${esc(CB.f.fp)}"></label></div>`;
   const NOMS = { bs:"Bolívares tasa BCV (monto en $)", ef:"Efectivo $", us:"USDT / USDC $", ze:"Zelle $", mp:"Mercantil Panamá $" };
   const orden = bcv ? ["bs", "ef", "us", "ze", "mp"] : ["ef", "us", "ze", "mp"];
@@ -898,6 +905,10 @@ function cbSum(){
         : dr.dec.auto ? `<span class="ok">Se aplica solo: el pago cae en el día hábil ${dr.dec.dh} de ${DCL}. Administración recibe el aviso.</span>`
         : `<span class="pa">El pago cae en el día hábil ${dr.dec.dh} (el límite es ${DCL}): el descuento queda por aprobar por administración.</span>`) +
       (c.bv > 0 && c.bv < x.saldo - 0.5 ? `<span>Con este descuento aún quedarían ${money(r2(x.saldo - c.bv))} por cobrar.</span>` : ""); }
+  const ti = $("cbTaI"); if(ti && !esB(n)){ const bsb = cbNum(CB.f.bsb), d = cbNum(CB.f.bs);
+    ti.innerHTML = bsb > 0 && d > 0 && CB.bsFix === "usd" ? `Tasa implícita: <b class="num">${esc(cbCom(bsb / d, 2))} Bs por $</b> (Bs ${esc(cbCom(bsb))} ÷ ${esc(money(d))}). Verifica que sea la que acordaste con el cliente.`
+      : bsb > 0 && d > 0 ? `Bs ${esc(cbCom(bsb))} ÷ ${esc(cbCom(cbNum(CB.f.ta), 2))} = ${esc(money(d))}.`
+      : "Si el pago cubre la nota, toca «Cubre la nota completa»: la tasa sale sola y solo verificas que sea la acordada. Si no, escribe la tasa acordada."; }
   const br = $("cbBsRow"); if(br && !esB(n)) br.hidden = !(c.bs > 0 || cbNum(CB.f.bsb) > 0 || CB.bsOn); const dl = $("cbDd"); if(dl) dl.hidden = !(c.div > 0);
   const dif = r2(x.saldo - c.bv), ajA = cbAjAdm(x, dif), tl = $("cbTopL");
   const aL = $("cbAjL"); if(aL) aL.hidden = true;
@@ -1976,6 +1987,11 @@ $("vCob").addEventListener("click", async e => {
   else if(k === "bsoff"){ const n = cbNotas().find(x => x.id === CB.nota); CB.bsOn = false; CB.f.bsb = ""; if(!(n && esB(n))){ CB.f.bs = ""; CB.f.ta = ""; } cobRender(); }
   else if(k === "capdel") cbCapQuita(Number(a.dataset.i));
   else if(k === "capok"){ CB.capOk = true; cbSum(); }
+  else if(k === "bsfull"){
+    const x = cbSaldoNota(); if(!x || esB(x.n)) return; const v = cbResto(x, "bs");
+    CB.f.bs = v > 0 ? cbCom(v) : ""; CB.bsFix = "usd"; (CB.man = CB.man || {}).bs = true; cbBsCalc(x.n);
+    ["bs", "ta"].forEach(q => { const i = $("cb_" + q); if(i) i.value = CB.f[q] || ""; }); cbSum();
+  }
   else if(k === "fill"){
     const x = cbSaldoNota(); if(!x) return; const key = a.dataset.k, f = Object.assign({}, CB.f, { [key]:"" }), otros = cbCalc(x.n, f), rest = Math.max(0, x.saldo - otros.bv);
     let v = rest;
@@ -2020,10 +2036,12 @@ $("vCob").addEventListener("input", e => { if(e.target.id === "rcQ"){ CB.rc.q = 
   const n = cbNotas().find(x => x.id === CB.nota);
   if(n && ["bsb", "tb", "ta", "fp"].indexOf(k) >= 0){
     if(k === "tb") CB.tbMan = true;
+    if(k === "ta") CB.bsFix = "ta";
     if(k === "fp" && esB(n) && !CB.tbMan){ const t = cbTasaDe(CB.f.fp); if(t){ CB.f.tb = cbCom(t, 4); const i = $("cb_tb"); if(i) i.value = CB.f.tb; } }
-    const antes = CB.f.bs; cbBsCalc(n); if(CB.f.bs !== antes){ const i = $("cb_bs"); if(i) i.value = CB.f.bs; }
+    const antes = CB.f.bs, ta0 = CB.f.ta; cbBsCalc(n); if(CB.f.bs !== antes){ const i = $("cb_bs"); if(i) i.value = CB.f.bs; } if(k !== "ta" && CB.f.ta !== ta0){ const i = $("cb_ta"); if(i) i.value = CB.f.ta; }
   }
-  if(k === "bs" && cbNum(CB.f.bsb) > 0){ CB.f.bsb = ""; const i = $("cb_bsb"); if(i) i.value = ""; }   // si escribe los dólares a mano, el monto en Bs ya no aplica
+  if(n && k === "bs" && !esB(n)){ CB.bsFix = "usd"; const ta0 = CB.f.ta; cbBsCalc(n); if(CB.f.ta !== ta0){ const i = $("cb_ta"); if(i) i.value = CB.f.ta; } }   // nota USD: dólares a mano → tasa implícita
+  else if(k === "bs" && cbNum(CB.f.bsb) > 0){ CB.f.bsb = ""; const i = $("cb_bsb"); if(i) i.value = ""; }   // si escribe los dólares a mano, el monto en Bs ya no aplica
   cbSum(); });
 /* barra inferior: cambia de ambiente. PEDIDOS vuelve a donde estabas (catálogo, pedido o mis pedidos); COBRANZAS abre siempre en la lista. */
 $("nav").addEventListener("click", e => {
