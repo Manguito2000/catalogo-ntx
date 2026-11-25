@@ -16,6 +16,8 @@ const cbNum = v => { const t = String(v == null ? "" : v).trim(), x = /\d[.,]\d{
    la conversión a dólares reales (factor BCV) la hace el sistema para administración. */
 const NT = r => ({ id:r[0], num:r[1], cid:r[2], fecha:r[3], vence:r[4], total:r[5], pagado:r[6], pend:r[7], tar:r[8], desc:r[9], real:r[10], pagos:r[12] || [], fac:r[13] || null,
   sal:r[8] === "b" ? (r[11] != null ? r[11] : r2(r[10] / FBCV())) : r[10] });
+/* monto en Bs: «31.275» (punto de miles, sin céntimos) son treinta y un mil, no 31,27 */
+const cbNumBs = v => { const t = String(v == null ? "" : v).trim(); return /^\d{1,3}(\.\d{3})+$/.test(t) ? cbNum(t.replace(/\./g, "")) : cbNum(t); };
 const esB = n => !!n && n.tar === "b";
 const cbM = (v, n) => money(v) + (esB(n) ? " BCV" : "");
 /* lo que un cobro le descuenta a la nota, en dólares de la nota (los cobros antiguos no traen "bv": se deduce) */
@@ -351,7 +353,7 @@ function cbCapRecalc(n){
   const conF = L.filter(c => c.lec.fechaDe === "captura" && c.lec.fecha), fb = conF.find(c => c.lec.met === "bs"), fs = conF.map(c => c.lec.fecha).sort();
   if(!man.fp){ if(cbCapSinFecha()) CB.f.fp = ""; else if(fb) CB.f.fp = fb.lec.fecha; else if(fs.length) CB.f.fp = fs[fs.length - 1]; }   // sin fecha en alguna captura: la escribe el vendedor
   if(set.has("bsb") && esB(n) && !CB.tbMan){ const t = cbTasaDe(CB.f.fp); if(t) CB.f.tb = cbCom(t, 4); }
-  if(set.has("bsb") && (!man.bs || CB.bsFix === "usd")) cbBsCalc(n);
+  if(set.has("bsb") && (!man.bs || cbBsUsd(n))) cbBsCalc(n);
   const refs = Array.from(new Set(L.map(c => c.lec.ref).filter(Boolean)));
   if(man.rf){} else if(refs.length) CB.f.rf = refs.join(" · "); else if(CB.capRf && CB.f.rf === CB.capRf) CB.f.rf = "";
   CB.capRf = refs.length ? CB.f.rf : "";
@@ -367,7 +369,7 @@ const CAP_MT = { bs:"bolívares", ze:"Zelle", us:"USDT / USDC", mp:"Mercantil Pa
 function cbCapMal(n, c){
   if(CB.capOk || cbCapLeyendo()) return "";
   const mets = Array.from(new Set((CB.caps || []).filter(k => k.lec && k.lec.met && k.lec.met !== "ef").map(k => k.lec.met)));
-  const falta = mets.filter(m => m === "bs" ? !(c.bs > 0 || cbNum(CB.f.bsb) > 0) : !(Number(c[m]) > 0));
+  const falta = mets.filter(m => m === "bs" ? !(c.bs > 0 || cbNumBs(CB.f.bsb) > 0) : !(Number(c[m]) > 0));
   if(!falta.length) return "";
   const dn = falta.indexOf("bs") < 0 ? "" : esB(n) ? " Escríbelo en «Bolívares tasa BCV»." : " Escríbelo en «Nota en USD / pago en Bs»: el monto en Bs y luego «Cubre la nota completa» (o la tasa acordada).";
   return "La captura es de un pago en " + falta.map(m => CAP_MT[m] || m).join(" y ") + ", pero el cobro no trae nada en " + (falta.length > 1 ? "esas formas" : "esa forma") + " de pago" + (c.ef > 0 ? " (lo anotaste como efectivo)" : "") + "." + dn;
@@ -386,9 +388,11 @@ const CAPMAX = 4;
 /* bolívares: monto en Bs ÷ tasa (BCV en notas BCV, la acordada en notas USD) = dólares de la nota */
 /* (25 nov 2026) nota en USD: si el vendedor fijó los dólares («Cubre la nota completa» o «Equivale en $» a mano), la tasa sale sola: Bs ÷ $ (tasa implícita).
    Si escribió la tasa, los dólares salen de Bs ÷ tasa. CB.bsFix = "usd" | "ta" dice cuál de los dos manda. */
+/* manda el monto en $ si el vendedor lo fijó, o si hay $ y todavía no hay tasa escrita */
+const cbBsUsd = n => !esB(n) && (CB.bsFix === "usd" || (CB.bsFix !== "ta" && cbNum(CB.f.bs) > 0 && (!(cbNum(CB.f.ta) > 0) || CB.taImp)));
 function cbBsCalc(n){
-  const bsb = cbNum(CB.f.bsb);
-  if(!esB(n) && CB.bsFix === "usd"){ const d = cbNum(CB.f.bs); if(bsb > 0 && d > 0) CB.f.ta = cbCom(bsb / d, 2); return; }
+  const bsb = cbNumBs(CB.f.bsb);
+  if(cbBsUsd(n)){ CB.taImp = true; const d = cbNum(CB.f.bs); if(bsb > 0 && d > 0) CB.f.ta = cbCom(bsb / d, 2); return; }
   const t = cbNum(esB(n) ? CB.f.tb : CB.f.ta);
   if(bsb > 0 && t > 0) CB.f.bs = cbCom(r2(bsb / t));
 }
@@ -431,7 +435,7 @@ function cbFDe(c){
   CB.man = {}; ["ef", "us", "ze", "mp", "bs", "bsb", "fp", "rf"].forEach(k => { if(CB.f[k]) CB.man[k] = true; });
   CB.mpOn = Number(c.mp) > 0; CB.bsOn = Number(c.bsb) > 0; CB.tbMan = Number(c.tbc) > 0;
 }
-const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; CB.on = {}; CB.man = {}; CB.capEf = false; CB.capOk = false; CB.bsFix = ""; };   // también olvida qué formas de pago se abrieron
+const cbCapLimpia = () => { (CB.caps || []).forEach(c => { if(c.url) URL.revokeObjectURL(c.url); }); CB.caps = []; CB.capSet = []; CB.capRf = ""; CB.on = {}; CB.man = {}; CB.capEf = false; CB.capOk = false; CB.bsFix = ""; CB.taImp = false; };   // también olvida qué formas de pago se abrieron
 function cbCapHtml(){
   const L = CB.caps || [], M = { ze:"Zelle", us:"USDT / USDC", bs:"Bolívares", mp:"Mercantil Panamá" };
   const item = (c, i) => { let st = "";
@@ -678,7 +682,7 @@ function cbFormHtml(){
   if(bcv && !CB.f.tb){ const t = cbTasaDe(CB.f.fp); if(t) CB.f.tb = cbCom(t, 4); }
   /* bolívares. Nota BCV: «Bolívares tasa BCV (monto en $)»; debajo, si se tiene el monto en Bs, la tasa BCV de la fecha del pago se pone sola.
      Nota en dólares: el desplegable «Nota en USD / pago en Bs» pide el monto en Bs y la tasa acordada (obligatoria); los dólares salen solos. */
-  const usdBs = !bcv && (c0.bs > 0 || cbNum(CB.f.bsb) > 0 || CB.bsOn), bcvBs = bcv && (CB.bsOn || cbNum(CB.f.bsb) > 0);
+  const usdBs = !bcv && (c0.bs > 0 || cbNumBs(CB.f.bsb) > 0 || CB.bsOn), bcvBs = bcv && (CB.bsOn || cbNumBs(CB.f.bsb) > 0);
   const bsRow = bcv
     ? (bcvBs ? `<div class="cbbs" id="cbBsRow"><div class="w2 cbbsh"><b>Monto en Bs</b><button type="button" class="txt" data-cb="bsoff">Cerrar</button></div>
       <label><span>Monto en Bs</span><input class="fld num" id="cb_bsb" data-cb-in="bsb" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(CB.f.bsb)}"></label>
@@ -799,7 +803,7 @@ function cbMultiSigue(){
 }
 function cbMultiVa(){
   const M = CB.multi, x = cbSaldoNota(); if(!M || !x || !x.multi) return; const c = cbCalc(x.n, CB.f, x.saldo);
-  if(c.nom <= 0 || cbCapLeyendo() || cbFpFalta() || cbFpFutura() || (!esB(x.n) && (c.bs > 0 || cbNum(CB.f.bsb) > 0) && !(cbNum(CB.f.ta) > 0)) || (esB(x.n) && cbNum(CB.f.bsb) > 0 && !(cbNum(CB.f.tb) > 0))) return;
+  if(c.nom <= 0 || cbCapLeyendo() || cbFpFalta() || cbFpFutura() || (!esB(x.n) && (c.bs > 0 || cbNumBs(CB.f.bsb) > 0) && !(cbNum(CB.f.ta) > 0)) || (esB(x.n) && cbNumBs(CB.f.bsb) > 0 && !(cbNum(CB.f.tb) > 0))) return;
   M.paso = "reparto"; M.man = false; M.ap = []; CB.err = ""; cobRender(); window.scrollTo(0, 0);
 }
 function cbMultiCalc(){
@@ -847,10 +851,10 @@ function cbRepartoHtml(){
 /* guarda: una fila por nota que recibe pago, mismo grupo y mismo recibo; la primera lleva lo que sobra */
 async function cbMultiGuarda(){
   const m = cbMultiCalc(); if(!m || CB.busy || !cbMrOk(m)) return; const { n, c, R } = m, bcv = esB(n);
-  if(!bcv && (c.bs > 0 || cbNum(CB.f.bsb) > 0) && !(cbNum(CB.f.ta) > 0)) return;
+  if(!bcv && (c.bs > 0 || cbNumBs(CB.f.bsb) > 0) && !(cbNum(CB.f.ta) > 0)) return;
   const caps = (CB.caps || []).slice(), lecs = caps.filter(k => k.lec).map(k => k.lec), filas = R.filas.filter(f => f.ef + f.us + f.ze + f.mp + f.bs > 0.004); if(!filas.length) return;
   CB.err = ""; CB.busy = true; cbMrRefresca();
-  const gr = cbUid(), gn = filas.map(f => f.num).join(" + "), rec = cbSigRec(false), t = Math.floor(Date.now() / 1000), bsbT = cbNum(CB.f.bsb), tbc = bcv && bsbT > 0 ? Number(String(CB.f.tb || "").replace(",", ".")) || 0 : 0;
+  const gr = cbUid(), gn = filas.map(f => f.num).join(" + "), rec = cbSigRec(false), t = Math.floor(Date.now() / 1000), bsbT = cbNumBs(CB.f.bsb), tbc = bcv && bsbT > 0 ? Number(String(CB.f.tb || "").replace(",", ".")) || 0 : 0;
   const sf = {}; ["ef", "us", "ze", "mp", "bs"].forEach(k => { if(R.sobra[k] > 0.004) sf[k] = r2(R.sobra[k]); });
   const fp = /^\d{4}-\d{2}-\d{2}$/.test(CB.f.fp || "") ? CB.f.fp : "", rf = (CB.f.rf || "").trim().slice(0, 120), conBs = filas.filter(f => f.bs > 0), sinSobraBs = !(R.sobra.bs > 0.004);
   const lx = (lecs.map(l => [l.met, l.mon, l.monto, l.fecha + (l.fechaDe === "imagen" ? "(img)" : ""), l.hora, l.ref, l.ms ? "⏱" + (l.ms / 1000).toFixed(1) + "s/" + l.pas + "p" : ""].join(" ").trim())
@@ -905,17 +909,18 @@ function cbSum(){
         : dr.dec.auto ? `<span class="ok">Se aplica solo: el pago cae en el día hábil ${dr.dec.dh} de ${DCL}. Administración recibe el aviso.</span>`
         : `<span class="pa">El pago cae en el día hábil ${dr.dec.dh} (el límite es ${DCL}): el descuento queda por aprobar por administración.</span>`) +
       (c.bv > 0 && c.bv < x.saldo - 0.5 ? `<span>Con este descuento aún quedarían ${money(r2(x.saldo - c.bv))} por cobrar.</span>` : ""); }
-  const ti = $("cbTaI"); if(ti && !esB(n)){ const bsb = cbNum(CB.f.bsb), d = cbNum(CB.f.bs);
-    ti.innerHTML = bsb > 0 && d > 0 && CB.bsFix === "usd" ? `Tasa implícita: <b class="num">${esc(cbCom(bsb / d, 2))} Bs por $</b> (Bs ${esc(cbCom(bsb))} ÷ ${esc(money(d))}). Verifica que sea la que acordaste con el cliente.`
+  const ti = $("cbTaI"); if(ti && !esB(n)){ const bsb = cbNumBs(CB.f.bsb), d = cbNum(CB.f.bs);
+    ti.innerHTML = bsb > 0 && d > 0 && cbBsUsd(n) ? `Tasa implícita: <b class="num">${esc(cbCom(bsb / d, 2))} Bs por $</b> (Bs ${esc(cbCom(bsb))} ÷ ${esc(money(d))}). Verifica que sea la que acordaste con el cliente.`
       : bsb > 0 && d > 0 ? `Bs ${esc(cbCom(bsb))} ÷ ${esc(cbCom(cbNum(CB.f.ta), 2))} = ${esc(money(d))}.`
+      : !(bsb > 0) && d > 0 ? `<b>Falta el monto en Bs.</b> Escribe arriba los bolívares que pagó el cliente (el monto de la captura) y la tasa sale sola.`
       : "Si el pago cubre la nota, toca «Cubre la nota completa»: la tasa sale sola y solo verificas que sea la acordada. Si no, escribe la tasa acordada."; }
-  const br = $("cbBsRow"); if(br && !esB(n)) br.hidden = !(c.bs > 0 || cbNum(CB.f.bsb) > 0 || CB.bsOn); const dl = $("cbDd"); if(dl) dl.hidden = !(c.div > 0);
+  const br = $("cbBsRow"); if(br && !esB(n)) br.hidden = !(c.bs > 0 || cbNumBs(CB.f.bsb) > 0 || CB.bsOn); const dl = $("cbDd"); if(dl) dl.hidden = !(c.div > 0);
   const dif = r2(x.saldo - c.bv), ajA = cbAjAdm(x, dif), tl = $("cbTopL");
   const aL = $("cbAjL"); if(aL) aL.hidden = true;
   if(aL && ajA != null){ aL.hidden = !(c.nom > 0) || Math.abs(dif) < 0.01; const cb = $("cbAj"); if(cb) cb.checked = !!ajA;
     const tx = $("cbAjT"); if(tx) tx.textContent = "La nota pasa a lo cobrado con una línea «Ajuste por redondeo» de " + (dif > 0 ? "−" : "+") + money(Math.abs(dif)) + "; el pago entra completo a su cuenta"; }
   if(tl){ tl.hidden = !(c.nom > 0); tl.innerHTML = c.nom > 0 ? `<span>Este cobro abona <b>${cbM(c.bv, n)}</b></span><span class="${dif >= CENT ? "" : "ok"}">${esc(cbDifTxt(dif, n))}</span>` : ""; }
-  const sobra = !x.multi && ((c.bv > x.saldo + 0.5 && !ajA) || c.iv > cbIvaPend(n) + 0.5), sinTasa = !esB(n) && (c.bs > 0 || cbNum(CB.f.bsb) > 0) && !(cbNum(CB.f.ta) > 0), sinTasaB = esB(n) && cbNum(CB.f.bsb) > 0 && !(cbNum(CB.f.tb) > 0);
+  const sobra = !x.multi && ((c.bv > x.saldo + 0.5 && !ajA) || c.iv > cbIvaPend(n) + 0.5), sinTasa = !esB(n) && (c.bs > 0 || cbNumBs(CB.f.bsb) > 0) && !(cbNum(CB.f.ta) > 0), sinTasaB = esB(n) && cbNumBs(CB.f.bsb) > 0 && !(cbNum(CB.f.tb) > 0);
   s.innerHTML = esB(n)
     ? (c.bs > 0 ? `<div><span>Bolívares</span><b class="num">${cbM(c.bs, n)}</b></div>` : "") + (c.div > 0 ? `<div><span>Divisas${c.dd ? " (−" + c.dd + " %)" : ""}</span><b class="num">${money(c.div)} → ${cbM(r2(c.bv - c.bs), n)}</b></div>` : "") +
       `<div><span>Abona a la nota</span><b class="num">${cbM(c.bv, n)}</b></div><div class="big"><span>Quedaría por cobrar</span><b class="bs num">${cbM(Math.max(0, resto), n)}</b></div>`
@@ -1049,7 +1054,7 @@ async function cbGuardar(){
     CB.edit = null;
   }
   const o = { id:cbUid(), n:x.n.id, nn:x.n.num, cn:cbCliente(x.n.cid), t:Math.floor(Date.now() / 1000), nom:c.nom, ab:c.ab, bv:c.bv, iv:c.iv, dd:c.dd, tb:esB(x.n) ? "b" : "", ef:c.ef, us:c.us, ze:c.ze, mp:c.mp, bs:c.bs,
-    ta:c.bs > 0 && !esB(x.n) ? cbNum(CB.f.ta) : 0, bsb:c.bs > 0 ? cbNum(CB.f.bsb) : 0, tbc:c.bs > 0 && esB(x.n) && cbNum(CB.f.bsb) > 0 ? Number(String(CB.f.tb || "").replace(",", ".")) || 0 : 0,
+    ta:c.bs > 0 && !esB(x.n) ? cbNum(CB.f.ta) : 0, bsb:c.bs > 0 ? cbNumBs(CB.f.bsb) : 0, tbc:c.bs > 0 && esB(x.n) && cbNumBs(CB.f.bsb) > 0 ? Number(String(CB.f.tb || "").replace(",", ".")) || 0 : 0,
     fp:/^\d{4}-\d{2}-\d{2}$/.test(CB.f.fp || "") ? CB.f.fp : "", ct:lecs.filter(l => l.met && l.met !== "ef").map(l => l.ct || "?").join(","), cd:lecs.filter(l => l.met && l.met !== "ef" && !l.ct).map(l => l.dest || "").filter(Boolean).join(" · ").slice(0, 120),
     lx:(lecs.map(l => [l.met, l.mon, l.monto, l.fecha + (l.fechaDe === "imagen" ? "(img)" : ""), l.hora, l.ref, l.ms ? "⏱" + (l.ms / 1000).toFixed(1) + "s/" + l.pas + "p" : ""].join(" ").trim())
       .concat(caps.filter(k => k.est === "error").map(k => "ERR " + (k.err || ""))).join(" | ") + (caps.length && OCR.t.baja ? " | lector bajado en " + Math.round(OCR.t.baja / 1000) + "s" : "") + (caps.length && OCR.t.red ? " | lector por red" : "")).slice(0, 300),
@@ -1991,6 +1996,7 @@ $("vCob").addEventListener("click", async e => {
     const x = cbSaldoNota(); if(!x || esB(x.n)) return; const v = cbResto(x, "bs");
     CB.f.bs = v > 0 ? cbCom(v) : ""; CB.bsFix = "usd"; (CB.man = CB.man || {}).bs = true; cbBsCalc(x.n);
     ["bs", "ta"].forEach(q => { const i = $("cb_" + q); if(i) i.value = CB.f[q] || ""; }); cbSum();
+    if(!(cbNumBs(CB.f.bsb) > 0)){ const i = $("cb_bsb"); if(i){ i.classList.add("falta"); i.focus(); } }
   }
   else if(k === "fill"){
     const x = cbSaldoNota(); if(!x) return; const key = a.dataset.k, f = Object.assign({}, CB.f, { [key]:"" }), otros = cbCalc(x.n, f), rest = Math.max(0, x.saldo - otros.bv);
@@ -2031,17 +2037,17 @@ $("vCob").addEventListener("change", e => { const mi = e.target.dataset && e.tar
   if(e.target.id === "cbCapF" && e.target.files && e.target.files.length){ const fs = Array.from(e.target.files); e.target.value = ""; cbCapElegida(fs); } });
 $("vCob").addEventListener("input", e => { if(e.target.id === "rcQ"){ CB.rc.q = e.target.value; const L = $("rcL"); if(L) L.innerHTML = rcListaHtml(); return; }
   if(e.target.id === "cb_fcm"){ CB.facTxt = e.target.value; CB.facErr = ""; const c = $("cbFcn"), x = $("cbFerr"); if(c) c.textContent = CB.facTxt.length + " / 600"; if(x) x.textContent = ""; return; } if(e.target.dataset && e.target.dataset.ap != null && CB.multi){ CB.multi.ap[Number(e.target.dataset.ap)] = e.target.value; CB.err = ""; cbMrRefresca(); return; }
-  const k = e.target.dataset && e.target.dataset.cbIn; if(!k) return; CB.f[k] = e.target.value; CB.err = ""; if(k in MT_NOM) CB.on[k] = true; (CB.man = CB.man || {})[k] = true;
+  const k = e.target.dataset && e.target.dataset.cbIn; if(!k) return; e.target.classList.remove("falta"); CB.f[k] = e.target.value; CB.err = ""; if(k in MT_NOM) CB.on[k] = true; (CB.man = CB.man || {})[k] = true;
   /* bolívares: Bs ÷ tasa = dólares de la nota. La tasa BCV sigue a la fecha del pago mientras el vendedor no la cambie a mano */
   const n = cbNotas().find(x => x.id === CB.nota);
   if(n && ["bsb", "tb", "ta", "fp"].indexOf(k) >= 0){
     if(k === "tb") CB.tbMan = true;
-    if(k === "ta") CB.bsFix = "ta";
+    if(k === "ta"){ CB.bsFix = "ta"; CB.taImp = false; }
     if(k === "fp" && esB(n) && !CB.tbMan){ const t = cbTasaDe(CB.f.fp); if(t){ CB.f.tb = cbCom(t, 4); const i = $("cb_tb"); if(i) i.value = CB.f.tb; } }
     const antes = CB.f.bs, ta0 = CB.f.ta; cbBsCalc(n); if(CB.f.bs !== antes){ const i = $("cb_bs"); if(i) i.value = CB.f.bs; } if(k !== "ta" && CB.f.ta !== ta0){ const i = $("cb_ta"); if(i) i.value = CB.f.ta; }
   }
   if(n && k === "bs" && !esB(n)){ CB.bsFix = "usd"; const ta0 = CB.f.ta; cbBsCalc(n); if(CB.f.ta !== ta0){ const i = $("cb_ta"); if(i) i.value = CB.f.ta; } }   // nota USD: dólares a mano → tasa implícita
-  else if(k === "bs" && cbNum(CB.f.bsb) > 0){ CB.f.bsb = ""; const i = $("cb_bsb"); if(i) i.value = ""; }   // si escribe los dólares a mano, el monto en Bs ya no aplica
+  else if(k === "bs" && cbNumBs(CB.f.bsb) > 0){ CB.f.bsb = ""; const i = $("cb_bsb"); if(i) i.value = ""; }   // si escribe los dólares a mano, el monto en Bs ya no aplica
   cbSum(); });
 /* barra inferior: cambia de ambiente. PEDIDOS vuelve a donde estabas (catálogo, pedido o mis pedidos); COBRANZAS abre siempre en la lista. */
 $("nav").addEventListener("click", e => {
